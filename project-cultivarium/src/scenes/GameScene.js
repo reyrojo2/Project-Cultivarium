@@ -20,68 +20,111 @@ function isoProject(gx, gy, offX, offY) {
   };
 }
 
-// === Detecta la "tapa" (rombo) leyendo el alfa del PNG y la cachea por textura ===
+// === Diamond por "aplanado desde arriba": escanea filas, toma top/bottom y fila de mayor ancho ===
 const TOP_FACE_CACHE = new Map();
 
-function measureTopDiamondFromAlpha(scene, texKey, alphaThr = 100) {
+function measureDiamondFromTop(scene, texKey, alphaThr = 180) {
   if (TOP_FACE_CACHE.has(texKey)) return TOP_FACE_CACHE.get(texKey);
 
-  const src = scene.textures.get(texKey).getSourceImage();
-  const w = src.width, h = src.height;
+  const img = scene.textures.get(texKey).getSourceImage();
+  const w = img.width, h = img.height;
 
-  const cv = document.createElement('canvas');
-  cv.width = w; cv.height = h;
+  // volcamos a canvas y leemos alpha
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
   const cx = cv.getContext('2d', { willReadFrequently: true });
-  cx.drawImage(src, 0, 0);
+  cx.drawImage(img, 0, 0);
   const data = cx.getImageData(0, 0, w, h).data;
   const alphaAt = (x, y) => data[(y*w + x)*4 + 3];
 
-  const midX = (w/2) | 0, midY = (h/2) | 0;
+  // por fila: minX / maxX de pix visibles
+  const minX = new Array(h).fill(+Infinity);
+  const maxX = new Array(h).fill(-Infinity);
 
-  let topInset = 0;  for (let y=0; y<h; y++)   { if (alphaAt(midX,y) > alphaThr) { topInset = y; break; } }
-  let botInset = 0;  for (let y=h-1; y>=0; y--){ if (alphaAt(midX,y) > alphaThr) { botInset = (h-1-y); break; } }
-  let leftInset = 0; for (let x=0; x<w; x++)   { if (alphaAt(x,midY) > alphaThr) { leftInset = x; break; } }
-  let rightInset= 0; for (let x=w-1; x>=0; x--){ if (alphaAt(x,midY) > alphaThr) { rightInset= (w-1-x); break; } }
+  for (let y=0; y<h; y++) {
+    let found = false;
+    for (let x=0; x<w; x++) {
+      if (alphaAt(x, y) > alphaThr) {
+        found = true;
+        if (x < minX[y]) minX[y] = x;
+        if (x > maxX[y]) maxX[y] = x;
+      }
+    }
+    if (!found) { minX[y] = +Infinity; maxX[y] = -Infinity; }
+  }
 
-  const halfW = (w/2) - Math.max(leftInset, rightInset);
-  const halfH = (h/2) - Math.max(topInset,  botInset);
+  // y_top: primera fila con píxel; y_bot: última
+  let yTop = 0; while (yTop < h && minX[yTop] === +Infinity) yTop++;
+  let yBot = h-1; while (yBot >= 0 && minX[yBot] === +Infinity) yBot--;
+  if (yTop >= yBot) {
+    // fallback sano
+    const halfW = w/2, halfH = h/2;
+    const polyLocal = new Phaser.Geom.Polygon([
+      new Phaser.Geom.Point(0, -halfH),
+      new Phaser.Geom.Point(halfW, 0),
+      new Phaser.Geom.Point(0,  halfH),
+      new Phaser.Geom.Point(-halfW, 0),
+    ]);
+    const res = { halfW, halfH, center: { x:w/2, y:h/2 }, polyLocal };
+    TOP_FACE_CACHE.set(texKey, res);
+    return res;
+  }
 
+  // yCent: fila con mayor ancho (ancho = maxX-minX+1)
+  let yCent = yTop, bestW = -1;
+  for (let y=yTop; y<=yBot; y++) {
+    if (minX[y] !== +Infinity) {
+      const width = (maxX[y] - minX[y] + 1);
+      if (width > bestW) { bestW = width; yCent = y; }
+    }
+  }
+
+  // centro geométrico del rombo: cx en mitad del ancho máximo; cy mitad entre top y bottom
+  const cxMax = (minX[yCent] + maxX[yCent]) / 2;
+  const cy = (yTop + yBot) / 2;
+
+  const halfW = bestW / 2;
+  const halfH = (yBot - yTop) / 2;
+
+  // vertices del rombo en coordenadas de textura (px)
+  const topPt    = { x: cxMax, y: yTop };
+  const rightPt  = { x: cxMax + halfW, y: cy };
+  const bottomPt = { x: cxMax, y: yBot };
+  const leftPt   = { x: cxMax - halfW, y: cy };
+
+  // pasa a coords locales del sprite (origen 0.5,0.5 → centro)
+  const toLocal = (p) => new Phaser.Geom.Point(p.x - w/2, p.y - h/2);
   const polyLocal = new Phaser.Geom.Polygon([
-    new Phaser.Geom.Point(0,      -halfH),
-    new Phaser.Geom.Point(halfW,    0),
-    new Phaser.Geom.Point(0,       halfH),
-    new Phaser.Geom.Point(-halfW,   0),
+    toLocal(topPt), toLocal(rightPt), toLocal(bottomPt), toLocal(leftPt)
   ]);
 
-  const res = { halfW, halfH, polyLocal };
+  const res = { halfW, halfH, center: { x: cxMax, y: cy }, polyLocal };
   TOP_FACE_CACHE.set(texKey, res);
   return res;
 }
 
 
 function addIsoTile(scene, key, gx, gy, offX, offY) {
-  const sx = Math.round(offX + (gx - gy) * 128); // PROJ_W/2 con 256x128
+  const sx = Math.round(offX + (gx - gy) * 128);
   const sy = Math.round(offY + (gx + gy) * 64);
 
   const img = scene.add.image(sx, sy, key).setOrigin(0.5, 0.5);
   img.setDepth(sy + gy * 0.001);
 
-  // Polígono exacto de la tapa (según alpha)
-  const { polyLocal } = measureTopDiamondFromAlpha(scene, key, 100);
+  // polígono exacto por "aplanado desde arriba"
+  const { polyLocal } = measureDiamondFromTop(scene, key, 180);
 
-  // Opcional: encoge 2–4 px para que el click no toque la orilla
-  const INSET = 4;
-  const insetPoly = new Phaser.Geom.Polygon(polyLocal.points.map(p => {
-    // Escalado uniforme hacia adentro (aprox.)
-    const kx = (Math.abs(p.x) - INSET) / Math.max(Math.abs(p.x), 1);
-    const ky = (Math.abs(p.y) - INSET/2) / Math.max(Math.abs(p.y), 1);
-    return new Phaser.Geom.Point(p.x * kx, p.y * ky);
-  }));
+  // inset suave para no tocar la orilla (ajusta a gusto)
+  const INSET_X = 8, INSET_Y = 4;
+  const insetPoly = new Phaser.Geom.Polygon(
+    polyLocal.points.map(p => new Phaser.Geom.Point(
+      Math.sign(p.x) * Math.max(0, Math.abs(p.x) - INSET_X),
+      Math.sign(p.y) * Math.max(0, Math.abs(p.y) - INSET_Y)
+    ))
+  );
 
   img.setInteractive(insetPoly, Phaser.Geom.Polygon.Contains);
-
-  // Guarda el polígono para el selector (lo usaremos tal cual)
-  img.setData('topPoly', insetPoly);
+  img.setData('texKey', key);
+  img.setData('topPoly', insetPoly); // guardamos para el selector
   return img;
 }
 
@@ -100,6 +143,8 @@ export default class GameScene extends Phaser.Scene {
   }
 
   create() {
+        // Activa que solo el objeto “más arriba” reciba el click
+    if (this.input?.setTopOnly) this.input.setTopOnly(true);
     Factory.createPlayer({ name: 'AgroPro', cartera: 200 });
     Factory.createTienda();
 
@@ -112,6 +157,7 @@ export default class GameScene extends Phaser.Scene {
     const offX = this.scale.width / 2;
     const offY = 140;
     this.offX = offX; this.offY = offY;
+    
 
     const pick = arr => arr[(Math.random() * arr.length) | 0];
     const grassKeys  = ['Acid1','Acid2'];
@@ -209,55 +255,73 @@ selectParcela(id){
     agua: agua ? { nivel: Number(agua.nivel).toFixed(2) } : null
   });
 
-  const sprite = this.spriteByParcela.get(id);     // 👈 recupera el sprite
-  this.drawSelector(p.x, p.y, sprite);             // 👈 pásalo para usar su polígono
+  const sprite = this.spriteByParcela.get(id);          // 👈
+  this.drawSelector(p.x, p.y, sprite);                  // 👈 pasa el sprite
 }
 
-
-drawSelector(gx, gy, spriteForTile) {
-  const { sx, sy } = isoProject(gx, gy, this.offX, this.offY);
-
-  // si pasas el sprite: usa su polígono guardado. Si no, cae a rombo lógico.
-  const poly = spriteForTile?.getData('topPoly');
+drawSelector(_gx, _gy, sprite){
+  const SEL_Y_SCALE = 0.5;
   const g = this.selector || (this.selector = this.add.graphics());
+  g.clear().lineStyle(2, 0x60a5fa, 1);
 
-  g.clear()
-   .lineStyle(2, 0x60a5fa, 1)
-   .setDepth(sy + 9999);
+  if (sprite) {
+    const poly = sprite.getData('topPoly');
+    if (poly) {
+      const sx = sprite.x, sy = sprite.y;
+      const sxScale = sprite.scaleX ?? 1;
+      const syScale = sprite.scaleY ?? 1;
 
-  if (poly) {
-    // Dibuja el polígono trasladado al centro (sx,sy)
-    const pts = poly.points.map(p => ({ x: sx + p.x, y: sy + p.y }));
-    g.strokePoints(pts, true);
-  } else {
-    // fallback: rombo estándar 256x128
-    const halfW = 128, halfH = 64;
-    g.strokePoints(
-      [{x:sx, y:sy-halfH}, {x:sx+halfW, y:sy}, {x:sx, y:sy+halfH}, {x:sx-halfW, y:sy}],
-      true
-    );
+      // y local más alto (punta superior del rombo)
+      let topLocalY = Infinity;
+      for (const p of poly.points) if (p.y < topLocalY) topLocalY = p.y;
+
+      // escalamos hacia la punta: y' = top + (y - top) * scale
+      const pts = poly.points.map(p => ({
+        x: sx + p.x * sxScale,
+        y: sy + (topLocalY + (p.y - topLocalY) * SEL_Y_SCALE) * syScale
+      }));
+
+      g.setDepth(sy + 9999).strokePoints(pts, true);
+      return;
+    }
   }
+  // fallback (solo si no hay sprite)
+  const { sx, sy } = isoProject(_gx, _gy, this.offX, this.offY);
+  const halfW = PROJ_W/2, halfH = PROJ_H/2;
+  g.setDepth(sy + 9999).strokePoints(
+    [{x:sx, y:sy-halfH}, {x:sx+halfW, y:sy}, {x:sx, y:sy+halfH}, {x:sx-halfW, y:sy}],
+    true
+  );
 }
 
-  plowSelected() {
+
+plowSelected() {
   if (!this.selectedParcelaId) return;
   const p = repoGet('parcelas', this.selectedParcelaId);
-  if (!p) return;
-
   const sprite = this.spriteByParcela.get(p.id);
-  this.drawSelector(p.x, p.y, sprite);
   if (!sprite) return;
 
-  // Si ya está arada, no hacemos nada (o podrías alternar)
-  if (p.arada) {
-    this.game.events.emit('toast', { type: 'info', msg: `${p.id} ya está arada.` });
-    return;
-  }
+  if (p.arada) { this.game.events.emit('toast',{type:'info', msg:`${p.id} ya está arada.`}); return; }
 
-  sprite.setTexture('Lava3');   // 👈 cambia la textura visible
-  p.arada = true;               // 👈 estado lógico
-  this.game.events.emit('toast', { type: 'ok', msg: `Araste ${p.id}.` });
-  this.drawSelector(p.x, p.y);  // re-dibuja selector encima
+  sprite.setTexture('Lava3');
+  sprite.setData('texKey', 'Lava3');
+
+  const { polyLocal } = measureDiamondFromTop(this, 'Lava3', 180);
+  const INSET_X = 8, INSET_Y = 4;
+  const insetPoly = new Phaser.Geom.Polygon(
+    polyLocal.points.map(p => new Phaser.Geom.Point(
+      Math.sign(p.x) * Math.max(0, Math.abs(p.x) - INSET_X),
+      Math.sign(p.y) * Math.max(0, Math.abs(p.y) - INSET_Y)
+    ))
+  );
+
+  sprite.setData('topPoly', insetPoly);
+  sprite.setInteractive(insetPoly, Phaser.Geom.Polygon.Contains);
+
+  p.arada = true;
+  this.game.events.emit('toast', { type:'ok', msg:`Araste ${p.id}.` });
+
+  this.drawSelector(p.x, p.y, sprite); // siempre con sprite
 }
 
 
