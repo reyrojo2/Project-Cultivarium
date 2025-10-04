@@ -34,11 +34,14 @@ export default class UIScene extends Phaser.Scene {
     this.alertsText = this.add.text(abg.x + 10, abg.y + 10, 'Alertas:', { fontSize: '12px', color: '#fbbf24' }).setScrollFactor(0);
 
     // Botones (UI simple con texto interactivo)
+    const btnA = this.add.text(bg.x + 10, bg.y + 110, '🚜 Arar (A)', { fontSize: '12px', color: '#c57122ff', backgroundColor: '#2a1e0bff' })
+      .setPadding(6,4,6,4).setInteractive({ useHandCursor: true }).setScrollFactor(0);
     const btnR = this.add.text(bg.x + 10, bg.y + 110, '💧 Regar (R)', { fontSize: '12px', color: '#22c55e', backgroundColor: '#0b2a1a' })
       .setPadding(6,4,6,4).setInteractive({ useHandCursor: true }).setScrollFactor(0);
     const btnC = this.add.text(bg.x + 130, bg.y + 110, '🌾 Cosechar (C)', { fontSize: '12px', color: '#eab308', backgroundColor: '#2a230b' })
       .setPadding(6,4,6,4).setInteractive({ useHandCursor: true }).setScrollFactor(0);
 
+    btnA.on('pointerdown', () => this.game.scene.get('Game').plowSelected());
     btnR.on('pointerdown', () => this.game.scene.get('Game').waterSelected());
     btnC.on('pointerdown', () => this.game.scene.get('Game').harvestSelected());
 

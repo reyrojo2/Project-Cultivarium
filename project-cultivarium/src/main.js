@@ -27,6 +27,7 @@ const config = {
     default: 'arcade',
     arcade: { gravity: { y: 0 }, debug: false }
   },
+  render: { pixelArt: true, antialias: false, roundPixels: true },
   scene: [BootScene, PreloadScene, GameScene, UIScene]
 };
 
