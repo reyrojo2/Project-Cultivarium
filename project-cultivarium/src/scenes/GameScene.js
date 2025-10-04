@@ -160,11 +160,11 @@ export default class GameScene extends Phaser.Scene {
     Factory.createPlayer({ name: 'AgroPro', cartera: 200 });
     Factory.createTienda();
 
-    // === Mapa (más grande si quieres) ===
-    const FARM_COLS = 18;
-    const FARM_ROWS = 10;
+    // === Mapa (más grande) ===
+    const FARM_COLS = 24;   // antes 18
+    const FARM_ROWS = 14;   // antes 10
 
-    // --- Borde dinámico para que el rombo (pasto) cubra todo el canvas ---
+    // --- Borde dinámico para cubrir el canvas ---
     const halfW = PROJ_W / 2;   // 128
     const halfH = PROJ_H / 2;   // 64
 
@@ -184,18 +184,24 @@ export default class GameScene extends Phaser.Scene {
 
     // coronas de pasto necesarias a cada lado
     const BORDER_NEEDED = Math.max(0, Math.ceil((needSum - sumCR) / 2));
-    const RINGS_VISIBLE = 2;
+    const RINGS_VISIBLE = 6;           // antes 2 → más “terreno”
     const BORDER = BORDER_NEEDED + RINGS_VISIBLE;
 
     // centro del mapa
     const offX = this.scale.width / 2;
     const offY = 140;
     this.offX = offX; this.offY = offY;
-    
 
     const pick = arr => arr[(Math.random() * arr.length) | 0];
     const grassKeys  = ['Acid1','Acid2'];
-    const parcelKeys = ['Lava1','Lava3']; // Lava3 = arada
+    const soilKey    = 'Lava1';   // tierra arable (sin arar)
+    const plowedKey  = 'Lava3';   // arada (cuando presionas A)
+    const pathKey    = 'Lava2';   // <- CAMINO (usa la que tengas; si no, haz tint)
+
+    // Parámetros de caminos
+    const BLOCK_W = 6;  // ancho de bloque arable entre caminos
+    const BLOCK_H = 6;  // alto  de bloque arable entre caminos
+    const PATH_W  = 1;  // grosor del camino
 
     const TOTAL_COLS = FARM_COLS + BORDER * 2;
     const TOTAL_ROWS = FARM_ROWS + BORDER * 2;
@@ -207,25 +213,56 @@ export default class GameScene extends Phaser.Scene {
       for (let gx=0; gx<TOTAL_COLS; gx++) {
         const isFarm = gx>=FARM_MIN_X && gx<=FARM_MAX_X && gy>=FARM_MIN_Y && gy<=FARM_MAX_Y;
 
-        const key = isFarm ? 'Lava1' : pick(grassKeys);   // 👈 SIEMPRE Lava1 al inicio
-        const tile = addIsoTile(this, key, gx, gy, offX, offY);
+        let key;
+        let tile = null;
 
-        if (isFarm) {
-          const recAgua = Factory.createRecurso({ tipo: 'AGUA', nivel: 0.8 });
-          const cultivo = Factory.createCultivo({ tipo: (gx+gy)%3===0 ? 'MAIZ' : 'TRIGO' });
-          const parcela = Factory.createParcela({
-            x: gx, y: gy, w: PROJ_W, h: PROJ_H,
-            recursos: [recAgua.id], cultivoId: cultivo.id, saludSuelo: 0.8,
-            arada: false                                      // 👈 flag opcional
-          });
-
-          this.spriteByParcela.set(parcela.id, tile);        // 👈 guarda sprite
-          tile.on('pointerdown', () => this.selectParcela(parcela.id));
+        if (!isFarm) {
+          // PASTO (anillos) — no interactivo
+          key = pick(grassKeys);
+          tile = addIsoTile(this, key, gx, gy, offX, offY);
+          continue;
         }
+
+        // ===== Dentro del área jugable: decidir CAMINO vs SUELO =====
+        // coords relativas al área jugable
+        const cc = gx - BORDER;
+        const rr = gy - BORDER;
+
+        const inVPath = ((cc + 1) % (BLOCK_W + PATH_W)) > BLOCK_W;
+        const inHPath = ((rr + 1) % (BLOCK_H + PATH_W)) > BLOCK_H;
+        const isPath  = inVPath || inHPath;
+
+        if (isPath) {
+          // CAMINO (no arable, no parcela)
+          key = pathKey;
+          tile = addIsoTile(this, key, gx, gy, offX, offY);
+          // Si no tienes textura de camino, deja soilKey pero con tinte:
+          // tile.setTexture(soilKey).setTint(0xcccccc);
+          continue;
+        }
+
+        // SUELO ARABLE (sin cultivo por defecto)
+        key = soilKey;
+        tile = addIsoTile(this, key, gx, gy, offX, offY);
+
+        // Recurso agua (inicia seco para forzar riego)
+        const recAgua = Factory.createRecurso({ tipo: 'AGUA', nivel: 0.0 });
+
+        // ⚠️ Sin cultivo inicial
+        const parcela = Factory.createParcela({
+          x: gx, y: gy, w: PROJ_W, h: PROJ_H,
+          recursos: [recAgua.id],
+          cultivoId: null,       // <<< SIN CULTIVO
+          saludSuelo: 0.8,
+          arada: false           // flag tuyo
+        });
+
+        this.spriteByParcela.set(parcela.id, tile);
+        tile.on('pointerdown', () => this.selectParcela(parcela.id));
       }
     }
 
-    // Límites de cámara basados en el rombo total
+    // ===== Límites de cámara tal cual los tenías =====
     const tl = isoProject(0, TOTAL_ROWS - 1, this.offX, this.offY);
     const br = isoProject(TOTAL_COLS - 1, 0, this.offX, this.offY);
 
@@ -239,18 +276,14 @@ export default class GameScene extends Phaser.Scene {
     const cx   = (minX + maxX) / 2;
     const cy   = (minY + maxY) / 2;
 
-    // Zoom para encajar con un margen visual (padFit en píxeles de pantalla)
     const zoomX = (vw - padFit*2) / mapW;
     const zoomY = (vh - padFit*2) / mapH;
     const zoom  = Math.min(zoomX, zoomY);
 
-    // 👉 padding de bounds en unidades de mundo, basado en el zoom elegido
-    // (media pantalla en mundo) — así la cámara puede centrar sin ser recortada
     const padWorldX = (vw / zoom) * 0.5;
     const padWorldY = (vh / zoom) * 0.5;
     const padWorld  = Math.max(padWorldX, padWorldY);
 
-    // Fija bounds con padding suficiente
     this.cameras.main.setBounds(
       minX - padWorld,
       minY - padWorld,
@@ -258,24 +291,9 @@ export default class GameScene extends Phaser.Scene {
       mapH + padWorld*2
     );
 
-    // Aplica zoom y centra
     this.cameras.main.setZoom(zoom);
     this.cameras.main.centerOn(cx, cy);
 
-    // Re-encajar al redimensionar
-    this.scale.on('resize', ({ width, height }) => {
-      const zX = (width  - padFit*2) / mapW;
-      const zY = (height - padFit*2) / mapH;
-      const z  = Math.min(zX, zY);
-
-      const pwX = (width / z) * 0.5;
-      const pwY = (height / z) * 0.5;
-      const pw  = Math.max(pwX, pwY);
-
-      this.cameras.main.setBounds(minX - pw, minY - pw, mapW + pw*2, mapH + pw*2);
-      this.cameras.main.setZoom(z);
-      this.cameras.main.centerOn(cx, cy);
-    });
 
     // Evento clima demo
     Factory.createEventoClimatico({
