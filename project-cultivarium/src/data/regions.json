@@ -1,0 +1,28 @@
+{
+  "pe_piura":      { "name":"Perú - Piura",        "lat":-5.2,  "lon":-80.6 },
+  "pe_tumbes":     { "name":"Perú - Tumbes",       "lat":-3.6,  "lon":-80.4 },
+  "pe_lambayeque": { "name":"Perú - Lambayeque",   "lat":-6.7,  "lon":-79.9 },
+  "pe_la_libertad":{ "name":"Perú - La Libertad",  "lat":-8.1,  "lon":-79.0 },
+  "pe_ancash":     { "name":"Perú - Áncash",       "lat":-9.5,  "lon":-77.5 },
+  "pe_lima":       { "name":"Perú - Lima",         "lat":-12.0, "lon":-77.0 },
+  "pe_ica":        { "name":"Perú - Ica",          "lat":-14.1, "lon":-75.7 },
+
+  "in_punjab":     { "name":"India - Punjab",         "lat":31.1, "lon":75.4 },
+  "in_up":         { "name":"India - Uttar Pradesh",  "lat":27.0, "lon":80.9 },
+  "in_ap":         { "name":"India - Andhra Pradesh", "lat":15.9, "lon":79.7 },
+
+  "af_ethiopia":   { "name":"Etiopía", "lat":9.1,  "lon":40.5 },
+  "af_somalia":    { "name":"Somalia", "lat":5.2,  "lon":46.2 },
+  "af_kenya":      { "name":"Kenia",   "lat":-0.0, "lon":37.9 },
+
+  "br_mato_grosso":{ "name":"Brasil - Mato Grosso", "lat":-12.6, "lon":-55.7 },
+  "br_para":       { "name":"Brasil - Pará",        "lat":-3.9,  "lon":-52.0 },
+  "br_bahia":      { "name":"Brasil - Bahía",       "lat":-12.9, "lon":-41.7 },
+
+  "id_indonesia":  { "name":"Indonesia", "lat":-2.5,  "lon":118.0 },
+  "eu_spain":      { "name":"España",    "lat":40.5,  "lon":-3.7 },
+  "eu_italy":      { "name":"Italia",    "lat":41.9,  "lon":12.6 },
+  "eu_greece":     { "name":"Grecia",    "lat":39.1,  "lon":21.8 },
+  "us_california": { "name":"EE. UU. - California", "lat":36.8, "lon":-119.4 },
+  "us_midwest":    { "name":"EE. UU. - Midwest",     "lat":41.3, "lon":-93.1 }
+}

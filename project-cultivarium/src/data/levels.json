@@ -1,0 +1,7 @@
+{
+  "L1": { "name": "Costa del Pacífico", "regions": ["pe_piura","pe_tumbes","pe_lambayeque","pe_la_libertad","pe_ancash","pe_lima","pe_ica"] },
+  "L2": { "name": "Graneros de India",  "regions": ["in_punjab","in_up","in_ap"] },
+  "L3": { "name": "Cuerno de África",   "regions": ["af_ethiopia","af_somalia","af_kenya"] },
+  "L4": { "name": "Amazonía & Cerrado", "regions": ["br_mato_grosso","br_para","br_bahia"] },
+  "L5": { "name": "Islas & Agro-Med",   "regions": ["id_indonesia","eu_spain","eu_italy","eu_greece","us_california","us_midwest"] }
+}
