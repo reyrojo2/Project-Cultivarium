@@ -149,8 +149,10 @@ export const Factory = {
   createTienda(overrides={}) {
     const e = {
       id: newId('shop'),
-      stock: overrides.stock || [], // { itemType:'RIEGO', precio:100 }
-      ...overrides
+      stock: overrides.stock || [
+        { itemType: 'RIEGO',  precio: 30 },
+        { itemType: 'COSECHA', precio: 20 }
+      ]
     };
     repoSet('tiendas', e);
     return e;

@@ -27,3 +27,15 @@ export const newId = (prefix='id') => `${prefix}_${_auto++}`;
 export const repoSet = (repo, entity) => State.repos[repo].set(entity.id, entity);
 export const repoGet = (repo, id) => State.repos[repo].get(id);
 export const repoAll = (repo) => Array.from(State.repos[repo].values());
+
+export function findFirstPlayer() {
+  const it = State.repos.jugadores.values().next();
+  return it.done ? null : it.value;
+}
+
+export function spend(player, amount) {
+  if (!player) return false;
+  if (player.cartera < amount) return false;
+  player.cartera -= amount;
+  return true;
+}

@@ -6,7 +6,11 @@ import UIScene from './scenes/UIScene.js';
 
 export const GAME = {
   WIDTH: 1024,
-  HEIGHT: 576
+  HEIGHT: 576,
+  ISO_MODE: true,
+  ISO_TILE_W: 128,   // ancho real de tu sprite
+  ISO_TILE_H: 64, 
+  TILE_SCALE: 0.300    // alto real de tu sprite
 };
 
 const config = {
