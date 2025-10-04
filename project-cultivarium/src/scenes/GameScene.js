@@ -110,23 +110,35 @@ function addIsoTile(scene, key, gx, gy, offX, offY) {
   const img = scene.add.image(sx, sy, key).setOrigin(0.5, 0.5);
   img.setDepth(sy + gy * 0.001);
 
-  // polígono exacto por "aplanado desde arriba"
+  // Polígono de la tapa medido desde arriba (en coords locales centradas)
   const { polyLocal } = measureDiamondFromTop(scene, key, 180);
 
-  // inset suave para no tocar la orilla (ajusta a gusto)
+  // Inset para no tocar el borde (ajusta a gusto)
   const INSET_X = 8, INSET_Y = 4;
-  const insetPoly = new Phaser.Geom.Polygon(
+  const polyLocalInset = new Phaser.Geom.Polygon(
     polyLocal.points.map(p => new Phaser.Geom.Point(
       Math.sign(p.x) * Math.max(0, Math.abs(p.x) - INSET_X),
       Math.sign(p.y) * Math.max(0, Math.abs(p.y) - INSET_Y)
     ))
   );
 
-  img.setInteractive(insetPoly, Phaser.Geom.Polygon.Contains);
+  // 👉 Hit-area debe estar en coords de textura: 0..width/0..height
+  //    Sumamos displayOriginX/Y (mitad del ancho/alto por origin 0.5)
+  const polyHit = new Phaser.Geom.Polygon(
+    polyLocalInset.points.map(p => new Phaser.Geom.Point(
+      p.x + img.displayOriginX,
+      p.y + img.displayOriginY
+    ))
+  );
+
+  img.setInteractive(polyHit, Phaser.Geom.Polygon.Contains);
+
+  // Guardamos el polígono centrado para el selector visual
+  img.setData('topPoly', polyLocalInset);
   img.setData('texKey', key);
-  img.setData('topPoly', insetPoly); // guardamos para el selector
   return img;
 }
+
 
 export default class GameScene extends Phaser.Scene {
   constructor() {
@@ -151,7 +163,29 @@ export default class GameScene extends Phaser.Scene {
     // === Mapa (más grande si quieres) ===
     const FARM_COLS = 18;
     const FARM_ROWS = 10;
-    const BORDER = 2;
+
+    // --- Borde dinámico para que el rombo (pasto) cubra todo el canvas ---
+    const halfW = PROJ_W / 2;   // 128
+    const halfH = PROJ_H / 2;   // 64
+
+    const vw = this.scale.width;
+    const vh = this.scale.height;
+
+    const padFit = 80; // margen visual
+    const needSpanX = vw + padFit * 2;
+    const needSpanY = vh + padFit * 2;
+
+    // Un grid CxR proyecta (C+R)*halfW en X y (C+R)*halfH en Y
+    const sumCR = FARM_COLS + FARM_ROWS;
+    const needSum = Math.max(
+      Math.ceil(needSpanX / halfW),
+      Math.ceil(needSpanY / halfH)
+    );
+
+    // coronas de pasto necesarias a cada lado
+    const BORDER_NEEDED = Math.max(0, Math.ceil((needSum - sumCR) / 2));
+    const RINGS_VISIBLE = 2;
+    const BORDER = BORDER_NEEDED + RINGS_VISIBLE;
 
     // centro del mapa
     const offX = this.scale.width / 2;
@@ -163,10 +197,11 @@ export default class GameScene extends Phaser.Scene {
     const grassKeys  = ['Acid1','Acid2'];
     const parcelKeys = ['Lava1','Lava3']; // Lava3 = arada
 
-    const TOTAL_COLS = FARM_COLS + BORDER*2;
-    const TOTAL_ROWS = FARM_ROWS + BORDER*2;
+    const TOTAL_COLS = FARM_COLS + BORDER * 2;
+    const TOTAL_ROWS = FARM_ROWS + BORDER * 2;
     const FARM_MIN_X = BORDER, FARM_MIN_Y = BORDER;
-    const FARM_MAX_X = BORDER+FARM_COLS-1, FARM_MAX_Y = BORDER+FARM_ROWS-1;
+    const FARM_MAX_X = BORDER + FARM_COLS - 1;
+    const FARM_MAX_Y = BORDER + FARM_ROWS - 1;
 
     for (let gy=0; gy<TOTAL_ROWS; gy++) {
       for (let gx=0; gx<TOTAL_COLS; gx++) {
@@ -191,16 +226,56 @@ export default class GameScene extends Phaser.Scene {
     }
 
     // Límites de cámara basados en el rombo total
-    const tl = isoProject(0, TOTAL_ROWS-1, offX, offY);
-    const br = isoProject(TOTAL_COLS-1, 0, offX, offY);
-    const pad = 250;
+    const tl = isoProject(0, TOTAL_ROWS - 1, this.offX, this.offY);
+    const br = isoProject(TOTAL_COLS - 1, 0, this.offX, this.offY);
+
+    const minX = Math.min(tl.sx, br.sx);
+    const maxX = Math.max(tl.sx, br.sx);
+    const minY = Math.min(tl.sy, br.sy);
+    const maxY = Math.max(tl.sy, br.sy);
+
+    const mapW = maxX - minX;
+    const mapH = maxY - minY;
+    const cx   = (minX + maxX) / 2;
+    const cy   = (minY + maxY) / 2;
+
+    // Zoom para encajar con un margen visual (padFit en píxeles de pantalla)
+    const zoomX = (vw - padFit*2) / mapW;
+    const zoomY = (vh - padFit*2) / mapH;
+    const zoom  = Math.min(zoomX, zoomY);
+
+    // 👉 padding de bounds en unidades de mundo, basado en el zoom elegido
+    // (media pantalla en mundo) — así la cámara puede centrar sin ser recortada
+    const padWorldX = (vw / zoom) * 0.5;
+    const padWorldY = (vh / zoom) * 0.5;
+    const padWorld  = Math.max(padWorldX, padWorldY);
+
+    // Fija bounds con padding suficiente
     this.cameras.main.setBounds(
-      Math.min(tl.sx, br.sx) - pad,
-      Math.min(tl.sy, br.sy) - pad,
-      Math.abs(br.sx - tl.sx) + pad*2,
-      Math.abs(br.sy - tl.sy) + pad*2
+      minX - padWorld,
+      minY - padWorld,
+      mapW + padWorld*2,
+      mapH + padWorld*2
     );
-    this.cameras.main.setZoom(0.5);
+
+    // Aplica zoom y centra
+    this.cameras.main.setZoom(zoom);
+    this.cameras.main.centerOn(cx, cy);
+
+    // Re-encajar al redimensionar
+    this.scale.on('resize', ({ width, height }) => {
+      const zX = (width  - padFit*2) / mapW;
+      const zY = (height - padFit*2) / mapH;
+      const z  = Math.min(zX, zY);
+
+      const pwX = (width / z) * 0.5;
+      const pwY = (height / z) * 0.5;
+      const pw  = Math.max(pwX, pwY);
+
+      this.cameras.main.setBounds(minX - pw, minY - pw, mapW + pw*2, mapH + pw*2);
+      this.cameras.main.setZoom(z);
+      this.cameras.main.centerOn(cx, cy);
+    });
 
     // Evento clima demo
     Factory.createEventoClimatico({
@@ -308,15 +383,24 @@ plowSelected() {
 
   const { polyLocal } = measureDiamondFromTop(this, 'Lava3', 180);
   const INSET_X = 8, INSET_Y = 4;
-  const insetPoly = new Phaser.Geom.Polygon(
+
+  const polyLocalInset = new Phaser.Geom.Polygon(
     polyLocal.points.map(p => new Phaser.Geom.Point(
       Math.sign(p.x) * Math.max(0, Math.abs(p.x) - INSET_X),
       Math.sign(p.y) * Math.max(0, Math.abs(p.y) - INSET_Y)
     ))
   );
 
-  sprite.setData('topPoly', insetPoly);
-  sprite.setInteractive(insetPoly, Phaser.Geom.Polygon.Contains);
+  // 👉 nuevo hit-area en coords de textura
+  const polyHit = new Phaser.Geom.Polygon(
+    polyLocalInset.points.map(p => new Phaser.Geom.Point(
+      p.x + sprite.displayOriginX,
+      p.y + sprite.displayOriginY
+    ))
+  );
+
+  sprite.setData('topPoly', polyLocalInset);
+  sprite.setInteractive(polyHit, Phaser.Geom.Polygon.Contains);
 
   p.arada = true;
   this.game.events.emit('toast', { type:'ok', msg:`Araste ${p.id}.` });
@@ -358,12 +442,20 @@ plowSelected() {
 
   update(_, delta) {
     const cam = this.cameras.main;
-    // movimiento cámara...
-    if (Phaser.Input.Keyboard.JustDown(this.keyA)) this.plowSelected();  // 👈
+    const dt = delta / 1000;
+    const v = this.camSpeed / cam.zoom; // velocidad “constante” con zoom
+
+    if (this.cursors?.left.isDown)  cam.scrollX -= v * dt;
+    if (this.cursors?.right.isDown) cam.scrollX += v * dt;
+    if (this.cursors?.up.isDown)    cam.scrollY -= v * dt;
+    if (this.cursors?.down.isDown)  cam.scrollY += v * dt;
+
+    if (Phaser.Input.Keyboard.JustDown(this.keyA)) this.plowSelected();
     if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.waterSelected();
     if (Phaser.Input.Keyboard.JustDown(this.keyC)) this.harvestSelected();
 
     State.clock += 1;
     tickClimate(); tickCrops(); tickPlagues(); tickAlerts();
   }
+
 }
