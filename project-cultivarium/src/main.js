@@ -1,24 +1,30 @@
-import './style.css'
-import javascriptLogo from './javascript.svg'
-import viteLogo from '/Cultivarium.svg'
-import { setupCounter } from './counter.js'
+import Phaser from 'phaser';
+import BootScene from './scenes/BootScene.js';
+import PreloadScene from './scenes/PreloadScene.js';
+import GameScene from './scenes/GameScene.js';
+import UIScene from './scenes/UIScene.js';
 
-document.querySelector('#app').innerHTML = `
-  <div>
-    <a href="https://vite.dev" target="_blank">
-      <img src="${viteLogo}" class="logo" alt="Vite logo" />
-    </a>
-    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript" target="_blank">
-      <img src="${javascriptLogo}" class="logo vanilla" alt="JavaScript logo" />
-    </a>
-    <h1>Hello Vite!</h1>
-    <div class="card">
-      <button id="counter" type="button"></button>
-    </div>
-    <p class="read-the-docs">
-      Click on the Vite logo to learn more
-    </p>
-  </div>
-`
+export const GAME = {
+  WIDTH: 1024,
+  HEIGHT: 576
+};
 
-setupCounter(document.querySelector('#counter'))
+const config = {
+  type: Phaser.AUTO,
+  parent: 'game-container',
+  backgroundColor: '#0f172a',
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: GAME.WIDTH,
+    height: GAME.HEIGHT
+  },
+  physics: {
+    default: 'arcade',
+    arcade: { gravity: { y: 0 }, debug: false }
+  },
+  scene: [BootScene, PreloadScene, GameScene, UIScene]
+};
+
+// Exponer para depurar por consola.
+window.__PHASER_GAME__ = new Phaser.Game(config);

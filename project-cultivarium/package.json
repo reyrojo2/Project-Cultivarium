@@ -1,14 +1,17 @@
 {
-  "name": "project-cultivarium",
+  "name": "cultivarium-vite-phaser-js",
+  "version": "0.1.0",
   "private": true,
-  "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
+  "dependencies": {
+    "phaser": "^3.60.0"
+  },
   "devDependencies": {
-    "vite": "^7.1.7"
+    "vite": "^5.4.0"
   }
 }
