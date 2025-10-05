@@ -136,17 +136,17 @@ export default class UIScene extends Phaser.Scene {
     let y = 20;
 
     // Nombre / Ubicación
-    this.playerNameText = this.add.text(W / 2, y, 'Agente', { fontSize: '24px', color: colors.dataAccent, fontStyle: 'bold' }).setOrigin(0.5, 0); 
+    this.playerNameText = this.add.text(W / 2, y, 'Agente', { fontSize: '24px', color: colors.textPrimary, fontStyle: 'bold' }).setOrigin(0.5, 0); 
     this.locationText   = this.add.text(W / 2, y += 30, 'Pampa Húmeda, AR', { fontSize: '16px', color: colors.textSecondary }).setOrigin(0.5, 0);
 
     // Día destacado (Aplica colores Data Accent)
     this.dayText = this.add.text(W / 2, y += 30, 'Día: 1', {
       fontSize: '18px',
-      color: colors.dataPanelBg, 
+      color: Phaser.Display.Color.IntegerToColor(colors.dataAccent).rgba, 
       fontStyle: '600',
-      backgroundColor: Phaser.Display.Color.IntegerToColor(colors.dataAccent).rgba, 
+      backgroundColor: Phaser.Display.Color.IntegerToColor(colors.dataPanelBg).rgba, 
       padding: { x: 12, y: 6 },
-      align: 'center'
+      align: 'center',
     }).setOrigin(0.5, 0);
 
     y += 48;
@@ -171,6 +171,7 @@ export default class UIScene extends Phaser.Scene {
     this.inspectText  = this.add.text(24, y + 24, 'Selecciona una parcela…', { fontSize: '12px', color: colors.textSecondary, wordWrap: { width: W - 48 } });
 
     container.add([this.playerNameText, this.locationText, this.dayText, this.inspectTitle, this.inspectText]);
+    container.bringToTop(this.dayText);
 
     const sep2 = this.add.graphics().fillStyle(colors.panelBorder, 0.5).fillRect(16, y += 110, W - 32, 2);
     container.add(sep2);
@@ -206,15 +207,16 @@ populateActionPanel(panel, colors) {
       btn.coolingDown = true;
 
       // 1) dispara acción real (directa a GameScene si existe método, si no, por evento)
-      const gameScene = this.game.scene.get('Game');
-      if (directFnName && gameScene && typeof gameScene[directFnName] === 'function') {
-        try { await gameScene[directFnName](); } catch(e) { /* opcional: log */ }
-      } else {
-        this.game.events.emit('action:perform', { actionType: eventType });
-      }
-
-      // 2) feedback inmediato en pantalla
-      this.showActionFeedback(feedbackText, feedbackColor);
+      const gameScene =
+        (this.scene?.get && this.scene.get('Game')) || 
+        (this.game?.scene?.getScene && this.game.scene.getScene('Game')) || 
+        null; 
+      
+      if (directFnName && gameScene && typeof gameScene[directFnName] === 'function') { 
+          try { await gameScene[directFnName](); } catch(e) { /* opcional: log */ }
+        } else {
+          this.game.events.emit('action:perform', { actionType: eventType });
+        }
 
       // 3) micro-animación “pressed”
       this.tweens.add({ targets: [btn.bg, btn.text], scale: 0.96, duration: 80, yoyo: true, ease: 'Quad.easeInOut' });
@@ -337,7 +339,6 @@ populateActionPanel(panel, colors) {
       } else {
         // EFECTO DE RECHAZO: El botón se "sacude"
         this.tweens.add({ targets: bg, x: bg.x + 5, duration: 50, yoyo: true, repeat: 1, ease: 'Sine.easeInOut' });
-        this.showActionFeedback('🚫 ¡Acción Bloqueada! Falta energía o dinero.', colors.bar.heat);
       }
     });
     
@@ -362,7 +363,7 @@ populateActionPanel(panel, colors) {
     let heatValue = 0;
 
     // --- 1. Lógica de Estado Real / Mock ---
-    const useMockState = true; 
+    const useMockState = false; 
 
     if (useMockState) {
         // Lógica MOCK (se omite para brevedad)

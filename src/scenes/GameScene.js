@@ -9,8 +9,10 @@ import { tickPlagues } from '../systems/plagueSystem.js';
 import { tickAlerts } from '../systems/alertSystem.js';
 import { findFirstPlayer, spend } from '../core/state.js';
 import { startLevel, tickSim, TimeState } from '../core/time.js';
+import { T, MAP_PRESETS, makePlayableMatrix, makeWorldMatrix, buildBlockIndex, buildFromPreset } from '../map/mapBuilder.js';
+import { DECOR, addDecor } from '../map/decor.js';
 
-// === Rombos perfectos 2:1 ===
+// === Proyección ISO 2:1 ===
 const PROJ_W = 256;
 const PROJ_H = 128;
 
@@ -21,23 +23,19 @@ function isoProject(gx, gy, offX, offY) {
   };
 }
 
-// === Diamond por "aplanado desde arriba": escanea filas, toma top/bottom y fila de mayor ancho ===
+// === Detección de tapa de rombo (para selector preciso) ===
 const TOP_FACE_CACHE = new Map();
-
 function measureDiamondFromTop(scene, texKey, alphaThr = 180) {
   if (TOP_FACE_CACHE.has(texKey)) return TOP_FACE_CACHE.get(texKey);
 
   const img = scene.textures.get(texKey).getSourceImage();
   const w = img.width, h = img.height;
-
-  // volcamos a canvas y leemos alpha
   const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
   const cx = cv.getContext('2d', { willReadFrequently: true });
   cx.drawImage(img, 0, 0);
   const data = cx.getImageData(0, 0, w, h).data;
   const alphaAt = (x, y) => data[(y*w + x)*4 + 3];
 
-  // por fila: minX / maxX de pix visibles
   const minX = new Array(h).fill(+Infinity);
   const maxX = new Array(h).fill(-Infinity);
 
@@ -53,11 +51,9 @@ function measureDiamondFromTop(scene, texKey, alphaThr = 180) {
     if (!found) { minX[y] = +Infinity; maxX[y] = -Infinity; }
   }
 
-  // y_top: primera fila con píxel; y_bot: última
   let yTop = 0; while (yTop < h && minX[yTop] === +Infinity) yTop++;
   let yBot = h-1; while (yBot >= 0 && minX[yBot] === +Infinity) yBot--;
   if (yTop >= yBot) {
-    // fallback sano
     const halfW = w/2, halfH = h/2;
     const polyLocal = new Phaser.Geom.Polygon([
       new Phaser.Geom.Point(0, -halfH),
@@ -70,7 +66,6 @@ function measureDiamondFromTop(scene, texKey, alphaThr = 180) {
     return res;
   }
 
-  // yCent: fila con mayor ancho (ancho = maxX-minX+1)
   let yCent = yTop, bestW = -1;
   for (let y=yTop; y<=yBot; y++) {
     if (minX[y] !== +Infinity) {
@@ -79,42 +74,31 @@ function measureDiamondFromTop(scene, texKey, alphaThr = 180) {
     }
   }
 
-  // centro geométrico del rombo: cx en mitad del ancho máximo; cy mitad entre top y bottom
   const cxMax = (minX[yCent] + maxX[yCent]) / 2;
   const cy = (yTop + yBot) / 2;
-
-  const halfW = bestW / 2;
+  const halfW = (maxX[yCent] - minX[yCent] + 1) / 2;
   const halfH = (yBot - yTop) / 2;
 
-  // vertices del rombo en coordenadas de textura (px)
   const topPt    = { x: cxMax, y: yTop };
   const rightPt  = { x: cxMax + halfW, y: cy };
   const bottomPt = { x: cxMax, y: yBot };
   const leftPt   = { x: cxMax - halfW, y: cy };
 
-  // pasa a coords locales del sprite (origen 0.5,0.5 → centro)
   const toLocal = (p) => new Phaser.Geom.Point(p.x - w/2, p.y - h/2);
-  const polyLocal = new Phaser.Geom.Polygon([
-    toLocal(topPt), toLocal(rightPt), toLocal(bottomPt), toLocal(leftPt)
-  ]);
+  const polyLocal = new Phaser.Geom.Polygon([toLocal(topPt), toLocal(rightPt), toLocal(bottomPt), toLocal(leftPt)]);
 
   const res = { halfW, halfH, center: { x: cxMax, y: cy }, polyLocal };
   TOP_FACE_CACHE.set(texKey, res);
   return res;
 }
 
-
 function addIsoTile(scene, key, gx, gy, offX, offY) {
   const sx = Math.round(offX + (gx - gy) * 128);
   const sy = Math.round(offY + (gx + gy) * 64);
-
   const img = scene.add.image(sx, sy, key).setOrigin(0.5, 0.5);
   img.setDepth(sy + gy * 0.001);
 
-  // Polígono de la tapa medido desde arriba (en coords locales centradas)
   const { polyLocal } = measureDiamondFromTop(scene, key, 180);
-
-  // Inset para no tocar el borde (ajusta a gusto)
   const INSET_X = 8, INSET_Y = 4;
   const polyLocalInset = new Phaser.Geom.Polygon(
     polyLocal.points.map(p => new Phaser.Geom.Point(
@@ -122,37 +106,26 @@ function addIsoTile(scene, key, gx, gy, offX, offY) {
       Math.sign(p.y) * Math.max(0, Math.abs(p.y) - INSET_Y)
     ))
   );
-
-  // 👉 Hit-area debe estar en coords de textura: 0..width/0..height
-  //    Sumamos displayOriginX/Y (mitad del ancho/alto por origin 0.5)
   const polyHit = new Phaser.Geom.Polygon(
     polyLocalInset.points.map(p => new Phaser.Geom.Point(
       p.x + img.displayOriginX,
       p.y + img.displayOriginY
     ))
   );
-
   img.setInteractive(polyHit, Phaser.Geom.Polygon.Contains);
-
-  // Guardamos el polígono centrado para el selector visual
   img.setData('topPoly', polyLocalInset);
   img.setData('texKey', key);
   return img;
 }
 
-// ---- constantes de color ----
-const SOIL_DRY    = { r:153, g:102, b: 51 }; // fill para seca
-const SOIL_WET    = { r: 92, g: 58,  b: 30 }; // fill para mojada (seca→oscura)
-
-// multiplicadores (0..1) para tint multiplicativo (mantiene textura)
-const PLOWED_MUL = { r: 0.85, g: 0.75, b: 0.55 };  // arada
-const WET_MUL    = { r: 0.70, g: 0.65, b: 0.60 };  // regada (oscurece)
-
-// utilidades
+// ---- Colores / tints ----
+const SOIL_DRY = { r:153, g:102, b:51 };
+const SOIL_WET = { r: 92, g: 58, b:30 };
+const PLOWED_MUL = { r:0.85, g:0.75, b:0.55 };
+const WET_MUL    = { r:0.70, g:0.65, b:0.60 };
 const toRGB = (r,g,b)=> (r<<16)|(g<<8)|b;
 const mulToTint = (m)=> toRGB((m.r*255)|0,(m.g*255)|0,(m.b*255)|0);
 const mulFactors = (a,b)=> ({ r:a.r*b.r, g:a.g*b.g, b:a.b*b.b });
-
 const jitterColor = (r,g,b, jr=6,jg=6,jb=4) => {
   const R = Phaser.Math.Clamp(r + Phaser.Math.Between(-jr, jr), 0, 255);
   const G = Phaser.Math.Clamp(g + Phaser.Math.Between(-jg, jg), 0, 255);
@@ -160,36 +133,69 @@ const jitterColor = (r,g,b, jr=6,jg=6,jb=4) => {
   return (R<<16)|(G<<8)|B;
 };
 
-function applySoilVisual(scene, parcelaId) {
-  const p   = repoGet('parcelas', parcelaId);
-  const spr = scene.spriteByParcela.get(parcelaId);
-  if (!p || !spr) return;
+// ============================================================================
+//                               MAP BUILDER (MATRIZ)
+// ============================================================================
 
+// Cambia este nombre para otro preset
+const SELECTED_MAP = 'base_4x3_9x9';
+
+function applyBlockVisual(scene, parcelaId) {
+  // parcelaId -> blockId -> sprites[]
+  const blockId = scene.blockIdByParcelaId.get(parcelaId);
+  if (!blockId) return;
+  const p = repoGet('parcelas', parcelaId);
+  const sprites = scene.spritesByBlockId.get(blockId) || [];
   const isWet = p.wetUntil && State.clock < p.wetUntil;
 
-  if (p.arada) {
-    // textura con surcos
-    spr.setTexture('Lava3');
-    spr.clearTint();   // limpia fills previos
-    spr.resetPipeline();
-
-    // multiplicativo base de arado
-    let mul = { ...PLOWED_MUL };
-    // si además está mojada, compón multiplicadores (más oscuro)
-    if (isWet) mul = mulFactors(mul, WET_MUL);
-
-    spr.setTint(mulToTint(mul)); // <-- multiplica (mantiene surcos)
-  } else {
-    // tierra sin arar: usamos FILL (recolorea por completo)
-    spr.setTexture('Lava1');
-    spr.clearTint();
-    spr.resetPipeline();
-    spr.setTintFill(
-      isWet
-        ? jitterColor(SOIL_WET.r, SOIL_WET.g, SOIL_WET.b, 4,4,3) // mojada = más oscuro
-        : jitterColor(SOIL_DRY.r, SOIL_DRY.g, SOIL_DRY.b, 6,6,4) // seca
-    );
+  for (const spr of sprites) {
+    if (p.arada) {
+      spr.setTexture('Lava3');
+      spr.clearTint(); spr.resetPipeline();
+      let mul = { ...PLOWED_MUL };
+      if (isWet) mul = mulFactors(mul, WET_MUL);
+      spr.setTint(mulToTint(mul));
+    } else {
+      spr.setTexture('Lava1');
+      spr.clearTint(); spr.resetPipeline();
+      spr.setTintFill(
+        isWet
+          ? jitterColor(SOIL_WET.r, SOIL_WET.g, SOIL_WET.b, 4,4,3)
+          : jitterColor(SOIL_DRY.r, SOIL_DRY.g, SOIL_DRY.b, 6,6,4)
+      );
+    }
   }
+}
+
+// ===== helpers de colocación sobre el grid (para decor) =====
+function makeOcc(TOTAL_W, TOTAL_H) {
+  return Array.from({ length: TOTAL_H }, () => Array(TOTAL_W).fill(false));
+}
+function canPlaceRect(occ, world, gx, gy, w, h, allowedTiles) {
+  const H = occ.length, W = occ[0].length;
+  for (let y=0; y<h; y++) {
+    for (let x=0; x<w; x++) {
+      const X = gx + x, Y = gy + y;
+      if (X < 0 || Y < 0 || X >= W || Y >= H) return false;
+      if (occ[Y][X]) return false;
+      if (!allowedTiles.includes(world[Y][X])) return false;
+    }
+  }
+  return true;
+}
+function occupyRect(occ, gx, gy, w, h) {
+  for (let y=0; y<h; y++) for (let x=0; x<w; x++) {
+    const X = gx + x, Y = gy + y;
+    if (occ[Y] && typeof occ[Y][X] !== 'undefined') occ[Y][X] = true;
+  }
+}
+// coloca y marca ocupación (usa addDecor de decor.js)
+function place(scene, isoProject, occ, world, gx, gy, name, opts = {}) {
+  const def = DECOR[name];
+  if (!def) return null;
+  if (!canPlaceRect(occ, world, gx, gy, def.footprint.w, def.footprint.h, [T.GRASS, T.SOIL])) return null;
+  occupyRect(occ, gx, gy, def.footprint.w, def.footprint.h);
+  return addDecor(scene, isoProject, gx, gy, name, opts);
 }
 
 
@@ -203,214 +209,205 @@ export default class GameScene extends Phaser.Scene {
     this.camSpeed = 400;
     this.selector = null;
     this.offX = 0; this.offY = 0;
-    this.spriteByParcela = new Map();
-    this.keyA = null;  
+    // mapas
+    this.spritesByBlockId = new Map();  // blockId -> sprite[]
+    this.parcelaByBlockId = new Map();  // blockId -> parcelaObj
+    this.blockIdByParcelaId = new Map();// parcelaId -> blockId
+    this.keyA = null;
+    this._cooldowns = { water: 0, plow: 0, harvest: 0, plant: 0 };
   }
 
   create() {
     startLevel(0);
-    console.log('[Game] create', window.__CV_START__); 
-    // Activa que solo el objeto “más arriba” reciba el click
     if (this.input?.setTopOnly) this.input.setTopOnly(true);
     Factory.createPlayer({ name: 'AgroPro', cartera: 200 });
     Factory.createTienda();
 
-    // === Mapa (más grande) ===
-    const FARM_COLS = 24;   // antes 18
-    const FARM_ROWS = 14;   // antes 10
-
-    // --- Borde dinámico para cubrir el canvas ---
-    const halfW = PROJ_W / 2;   // 128
-    const halfH = PROJ_H / 2;   // 64
-
-    const vw = this.scale.width;
-    const vh = this.scale.height;
-
-    const padFit = 80; // margen visual
-    const needSpanX = vw + padFit * 2;
-    const needSpanY = vh + padFit * 2;
-
-    // Un grid CxR proyecta (C+R)*halfW en X y (C+R)*halfH en Y
-    const sumCR = FARM_COLS + FARM_ROWS;
-    const needSum = Math.max(
-      Math.ceil(needSpanX / halfW),
-      Math.ceil(needSpanY / halfH)
-    );
-
-    // coronas de pasto necesarias a cada lado
-    const BORDER_NEEDED = Math.max(0, Math.ceil((needSum - sumCR) / 2));
-    const RINGS_VISIBLE = 6;           // antes 2 → más “terreno”
-    const BORDER = BORDER_NEEDED + RINGS_VISIBLE;
-
-    // centro del mapa
-    const offX = this.scale.width / 2;
-    const offY = 140;
-    this.offX = offX; this.offY = offY;
-
-    const pick = arr => arr[(Math.random() * arr.length) | 0];
-    const grassKeys  = ['Acid1','Acid2'];
-    const soilKey    = 'Lava1';   // tierra arable (sin arar)
-    const plowedKey  = 'Lava3';   // arada (cuando presionas A)
+    // ==== Texturas ====
+    const grassKeys  = ['Acid2'];
+    const soilKey    = 'Lava1';
     const pathKeys   = ['Ground2','Ground3','Ground4'];
+    const pick = arr => arr[(Math.random() * arr.length) | 0];
 
-    // Parámetros de caminos
-    const BLOCK_W = 6;  // ancho de bloque arable entre caminos
-    const BLOCK_H = 6;  // alto  de bloque arable entre caminos
-    const PATH_W  = 1;  // grosor del camino
+    // ==== Selección de mapa (preset) ====
+    // Asegúrate de definir SELECTED_MAP en tu archivo o reemplaza por una clave fija, ej: 'base_4x3_9x9'
+    const cfg = MAP_PRESETS[SELECTED_MAP]; // ej: MAP_PRESETS.base_4x3_9x9
+    const { plotsX, plotsY, parcelaSize, pathW, grassBorder } = cfg;
 
-    const TOTAL_COLS = FARM_COLS + BORDER * 2;
-    const TOTAL_ROWS = FARM_ROWS + BORDER * 2;
-    const FARM_MIN_X = BORDER, FARM_MIN_Y = BORDER;
-    const FARM_MAX_X = BORDER + FARM_COLS - 1;
-    const FARM_MAX_Y = BORDER + FARM_ROWS - 1;
+    // Matriz jugable (41x31 para 4x3 de 9x9 con caminos 1)
+    const play = makePlayableMatrix(plotsX, plotsY, parcelaSize, pathW);
+    const { blocks, blockIdAt, PLAY_W, PLAY_H } = buildBlockIndex(plotsX, plotsY, parcelaSize, pathW);
 
-    // === buffers de tipo de tile y sprites de suelo (para la pasada de decoración)
-    const tileType = [];         // "path" | "soil" | "grass"
-    const soilSprites = [];      // sprite por [gy][gx] si es suelo
+    // Inserta el área jugable en borde de pasto y obtén dimensiones
+    const { world, dims } = makeWorldMatrix(play, grassBorder);
+    const {
+      TOTAL_W, TOTAL_H,
+      FARM_MIN_X, FARM_MIN_Y, FARM_MAX_X, FARM_MAX_Y
+    } = dims;
 
-    function setType(gx, gy, type) {
-      if (!tileType[gy]) tileType[gy] = [];
-      tileType[gy][gx] = type;
-    }
-    function isPathAt(gx, gy) {
-      return tileType[gy]?.[gx] === 'path';
-    }
-    function saveSoilSprite(gx, gy, spr) {
-      if (!soilSprites[gy]) soilSprites[gy] = [];
-      soilSprites[gy][gx] = spr;
-    }
+    // Centro del mapa
+    this.offX = this.scale.width / 2;
+    this.offY = 140;
 
+    // === Colecciones por bloque/parcela ===
+    this.spritesByBlockId = new Map();
+    this.parcelaByBlockId = new Map();
+    this.blockIdByParcelaId = new Map();
+    this.spriteByParcela = new Map();    // parcelaId -> sprite representante (p/visual)
+    this.selectedParcelaId = null;
 
-    for (let gy=0; gy<TOTAL_ROWS; gy++) {
-      for (let gx=0; gx<TOTAL_COLS; gx++) {
-        const isFarm = gx>=FARM_MIN_X && gx<=FARM_MAX_X && gy>=FARM_MIN_Y && gy<=FARM_MAX_Y;
+    // helper: world coords -> blockId (dentro del área jugable)
+    this.blockIdAtWorld = (gy, gx) => {
+      const y = gy - grassBorder;
+      const x = gx - grassBorder;
+      if (y < 0 || x < 0 || y >= PLAY_H || x >= PLAY_W) return -1;
+      return blockIdAt[y][x];
+    };
 
-        let key;
-        let tile = null;
+    // === Render desde la matriz `world` ===
+    for (let gy = 0; gy < TOTAL_H; gy++) {
+      for (let gx = 0; gx < TOTAL_W; gx++) {
+        const type = world[gy][gx];
+        const texKey =
+          (type === T.GRASS) ? grassKeys[0] :
+          (type === T.PATH)  ? pick(pathKeys) :
+                              soilKey;
 
-        if (!isFarm) {
-          key = pick(grassKeys);
-          tile = addIsoTile(this, key, gx, gy, offX, offY);
-          setType(gx, gy, 'grass');     // ← marca
+        const tile = addIsoTile(this, texKey, gx, gy, this.offX, this.offY);
+
+        if (type === T.PATH) {
+          tile.setTint(0x9aa3a1);
+          continue;
+        }
+        if (type === T.GRASS) {
           continue;
         }
 
-        // ===== Dentro del área jugable: decidir CAMINO vs SUELO =====
-        const cc = gx - BORDER;   // coords relativas al área jugable
-        const rr = gy - BORDER;
-
-        const modX = BLOCK_W + PATH_W;
-        const modY = BLOCK_H + PATH_W;
-        const rx = cc % modX;
-        const ry = rr % modY;
-
-        const inVPath = rx >= BLOCK_W;  // ← antes usabas >, por eso no salían
-        const inHPath = ry >= BLOCK_H;
-        const isPath  = inVPath || inHPath;
-
-        if (isPath) {
-          const pathKey = pick(pathKeys);
-          tile = addIsoTile(this, pathKey, gx, gy, offX, offY);
-          tile.setTint(0x9aa3a1); // ↓ contraste (gris cálido)
-          setType(gx, gy, 'path');               // ← marca
-          continue;
-        }
-        // SUELO ARABLE (sin cultivo por defecto)
-        key = soilKey;
-        tile = addIsoTile(this, key, gx, gy, offX, offY);
+        // SOIL base (seca)
         tile.setTintFill(jitterColor(SOIL_DRY.r, SOIL_DRY.g, SOIL_DRY.b, 6, 6, 4));
 
-        setType(gx, gy, 'soil');          // ← marca
-        saveSoilSprite(gx, gy, tile);  
-
-        // Recurso agua (inicia seco para forzar riego)
-        const recAgua = Factory.createRecurso({ tipo: 'AGUA', nivel: 0.0 });
-
-        // ⚠️ Sin cultivo inicial
-        const parcela = Factory.createParcela({
-          x: gx, y: gy, w: PROJ_W, h: PROJ_H,
-          recursos: [recAgua.id],
-          cultivoId: null,       // <<< SIN CULTIVO
-          saludSuelo: 0.8,
-          arada: false           // flag tuyo
-        });
-
-        this.spriteByParcela.set(parcela.id, tile);
-        tile.on('pointerdown', () => this.selectParcela(parcela.id));
-      }
-    }
-
-    // ====== DECORACIÓN: sombra fina en bordes suelo↔camino ======
-    const edge = this.add.graphics()
-      .setDepth(9999)
-      .setAlpha(0.10)
-      .fillStyle(0x000000);
-
-    for (let gy = FARM_MIN_Y; gy <= FARM_MAX_Y; gy++) {
-      for (let gx = FARM_MIN_X; gx <= FARM_MAX_X; gx++) {
-        if (tileType[gy]?.[gx] !== 'soil') continue;
-
-        const touchRight = isPathAt(gx + 1, gy);
-        const touchDown  = isPathAt(gx, gy + 1);
-        if (!touchRight && !touchDown) continue;
-
-        const { sx, sy } = isoProject(gx, gy, offX, offY);
-        const hw = PROJ_W / 2, hh = PROJ_H / 2;
-
-        // sombra hacia la derecha (camino a la derecha)
-        if (touchRight) {
-          edge.fillTriangle(
-            sx, sy,           // vértice superior
-            sx + hw, sy,      // derecha
-            sx, sy + hh       // inferior
-          );
-        }
-        // sombra hacia abajo (camino abajo)
-        if (touchDown) {
-          edge.fillTriangle(
-            sx, sy,           // vértice superior
-            sx, sy + hh,      // inferior
-            sx - hw, sy       // izquierda
-          );
+        const blockId = this.blockIdAtWorld(gy, gx);
+        if (blockId > 0) {
+          if (!this.spritesByBlockId.has(blockId)) this.spritesByBlockId.set(blockId, []);
+          this.spritesByBlockId.get(blockId).push(tile);
+          tile.on('pointerdown', () => this.selectBlock(blockId));
         }
       }
     }
 
+    // === 1 “parcela lógica” por bloque ===
+    for (const b of blocks) {
+      const worldX0 = grassBorder + b.x0;
+      const worldY0 = grassBorder + b.y0;
 
-    // ===== Límites de cámara tal cual los tenías =====
-    const tl = isoProject(0, TOTAL_ROWS - 1, this.offX, this.offY);
-    const br = isoProject(TOTAL_COLS - 1, 0, this.offX, this.offY);
+      const recAgua = Factory.createRecurso({ tipo:'AGUA', nivel:0.0 });
+      const parcela = Factory.createParcela({
+        x: worldX0, y: worldY0, w: parcelaSize, h: parcelaSize,
+        recursos: [recAgua.id], cultivoId: null, saludSuelo: 0.8, arada: false
+      });
 
-    const minX = Math.min(tl.sx, br.sx);
-    const maxX = Math.max(tl.sx, br.sx);
-    const minY = Math.min(tl.sy, br.sy);
-    const maxY = Math.max(tl.sy, br.sy);
+      this.parcelaByBlockId.set(b.id, parcela);
+      this.blockIdByParcelaId.set(parcela.id, b.id);
 
-    const mapW = maxX - minX;
-    const mapH = maxY - minY;
-    const cx   = (minX + maxX) / 2;
-    const cy   = (minY + maxY) / 2;
+      // sprite “representante” (cualquiera del bloque; cojo el central si existe)
+      const list = this.spritesByBlockId.get(b.id) || [];
+      const rep  = list.length ? list[(list.length/2)|0] : null;
+      if (rep) this.spriteByParcela.set(parcela.id, rep);
+    }
 
-    const zoomX = (vw - padFit*2) / mapW;
-    const zoomY = (vh - padFit*2) / mapH;
+    // ======= DECOR: granero, silo, árboles, rocas, arbustos, tractor =======
+    // matriz de ocupación para evitar solapamientos de footprints
+    const occ = makeOcc(TOTAL_W, TOTAL_H);
+
+    // --- GRANERO (512x256, footprint 2x2) en la franja de pasto izquierda ---
+    {
+      const gx = Math.max(0, Math.floor(grassBorder / 2));
+      const gy = Math.max(0, Math.floor((TOTAL_H - 2) / 2));
+      place(this, isoProject, occ, world, gx, gy, 'barn',   { projW: PROJ_W });
+    }
+
+    // --- SILO (380x760, footprint 2x2) en pasto derecha ---
+    {
+      const gx = Math.min(TOTAL_W - 2, TOTAL_W - Math.ceil(grassBorder / 2) - 2);
+      const gy = Math.max(0, Math.floor((TOTAL_H - 2) / 2) - 2);
+      place(this, isoProject, occ, world, gx, gy, 'silo',   { projW: PROJ_W });
+    }
+
+    // --- TRACTOR (1x1) cerca de la primera parcela ---
+    {
+      const block = (blocks && blocks[0]) ? blocks[0] : null;
+      const gx = block ? (grassBorder + block.x0 + block.w - 1) : (FARM_MIN_X + 1);
+      const gy = block ? (grassBorder + block.y0 + 1)             : (FARM_MIN_Y + 1);
+      place(this, isoProject, occ, world, gx, gy, 'tractor',{ projW: PROJ_W });
+    }
+
+    // --- Árboles (1x1) al borde superior e inferior del pasto ---
+    {
+      const tryPlaceTreeRow = (gyRow) => {
+        for (let gx = 1; gx < TOTAL_W - 1; gx += 4) {
+          if (world[gyRow][gx] === T.GRASS) {
+            place(this, isoProject, occ, world, gx, gyRow, 'tree');
+          }
+        }
+      };
+      tryPlaceTreeRow(FARM_MIN_Y - 2 >= 0 ? FARM_MIN_Y - 2 : 0);
+      tryPlaceTreeRow(Math.min(TOTAL_H - 1, FARM_MAX_Y + 2));
+    }
+
+    // --- Rocas sueltas en el pasto ---
+    {
+      const tries = 25;
+      for (let i = 0; i < tries; i++) {
+        const gx = Phaser.Math.Between(1, TOTAL_W - 2);
+        const gy = Phaser.Math.Between(1, TOTAL_H - 2);
+        if (world[gy][gx] !== T.GRASS) continue;
+        const name = (Math.random() < 0.5) ? 'rock1' : 'rock2';
+        if (place(this, isoProject, occ, world, gx, gy, name)) {
+          occupyRect(occ, gx - 1, gy - 1, 3, 3); // dejar aire
+        }
+      }
+    }
+
+    // --- Arbustos en pequeños grupos (pastos esquinas) ---
+    {
+      const cluster = (cx, cy, radius = 2, count = 4) => {
+        for (let i = 0; i < count; i++) {
+          const dx = Phaser.Math.Between(-radius, radius);
+          const dy = Phaser.Math.Between(-radius, radius);
+          const gx = Phaser.Math.Clamp(cx + dx, 0, TOTAL_W - 1);
+          const gy = Phaser.Math.Clamp(cy + dy, 0, TOTAL_H - 1);
+          if (world[gy][gx] !== T.GRASS) continue;
+          place(this, isoProject, occ, world, gx, gy, 'bush1');
+        }
+      };
+      cluster(Math.floor(grassBorder / 2), Math.floor(grassBorder / 2));
+      cluster(TOTAL_W - Math.floor(grassBorder / 2) - 1, Math.floor(grassBorder / 2));
+      cluster(Math.floor(grassBorder / 2), TOTAL_H - Math.floor(grassBorder / 2) - 1);
+      cluster(TOTAL_W - Math.floor(grassBorder / 2) - 1, TOTAL_H - Math.floor(grassBorder / 2) - 1);
+    }
+
+
+
+    // ===== Límites de cámara =====
+    const tl = isoProject(0, TOTAL_H - 1, this.offX, this.offY);
+    const br = isoProject(TOTAL_W - 1, 0, this.offX, this.offY);
+    const minX = Math.min(tl.sx, br.sx), maxX = Math.max(tl.sx, br.sx);
+    const minY = Math.min(tl.sy, br.sy), maxY = Math.max(tl.sy, br.sy);
+
+    const vw = this.scale.width, vh = this.scale.height, padFit = 80;
+    const mapW = maxX - minX, mapH = maxY - minY;
+    const zoomX = (vw - padFit * 2) / mapW;
+    const zoomY = (vh - padFit * 2) / mapH;
     const zoom  = Math.min(zoomX, zoomY);
-
     const padWorldX = (vw / zoom) * 0.5;
     const padWorldY = (vh / zoom) * 0.5;
     const padWorld  = Math.max(padWorldX, padWorldY);
 
-    this.cameras.main.setBounds(
-      minX - padWorld,
-      minY - padWorld,
-      mapW + padWorld*2,
-      mapH + padWorld*2
-    );
-
+    this.cameras.main.setBounds(minX - padWorld, minY - padWorld, mapW + padWorld * 2, mapH + padWorld * 2);
     this.cameras.main.setZoom(zoom);
-    this.cameras.main.centerOn(cx, cy);
+    this.cameras.main.centerOn((minX + maxX) / 2, (minY + maxY) / 2);
 
-
-    // Evento clima demo
+    // ===== Clima demo =====
     Factory.createEventoClimatico({
       tipo: EVENTOS_TIPO.SEQUIA,
       intensidad: NIVELES.INTENSIDAD.MEDIA,
@@ -418,140 +415,123 @@ export default class GameScene extends Phaser.Scene {
       area: { x: -9999, y: -9999, w: 9999, h: 9999 }
     });
 
-    // Inputs
+    // ===== Inputs =====
     this.cursors = this.input.keyboard.createCursorKeys();
-
-    // HUD
-    this.add.text(16, 8,
-      'ISO 256×128 — Arar (A) / Riega (R) / Cosecha (C) — Click parcela para seleccionar',
-      { fontFamily:'ui-sans-serif, system-ui, sans-serif', fontSize:'14px', color:'#e2e8f0' }
-    ).setScrollFactor(0);
-
     this.keyA = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyR = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.keyC = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
 
+    // HUD breve
+    this.add.text(16, 8,
+      'ISO 256×128 — Arar (A) / Riega (R) / Cosecha (C) — Click bloque para seleccionar',
+      { fontFamily:'ui-sans-serif, system-ui, sans-serif', fontSize:'14px', color:'#e2e8f0' }
+    ).setScrollFactor(0);
+
     // Pan/Zoom
     this.input.mouse.disableContextMenu();
-    this.input.on('wheel', (_p,_o,_dx,dy) => {
+    this.input.on('wheel', (_p, _o, _dx, dy) => {
       const cam = this.cameras.main;
-      cam.setZoom(Phaser.Math.Clamp(cam.zoom * (dy>0 ? 0.9 : 1.1), 0.3, 2.5));
+      cam.setZoom(Phaser.Math.Clamp(cam.zoom * (dy > 0 ? 0.9 : 1.1), 0.3, 2.5));
     });
-    let dragging=false, last={x:0,y:0};
-    this.input.on('pointerdown', p=>{ if(p.rightButtonDown()){ dragging=true; last={x:p.x,y:p.y}; }});
-    this.input.on('pointerup', ()=> dragging=false);
-    this.input.on('pointermove', p=>{
-      if(!dragging) return;
-      const cam=this.cameras.main;
-      cam.scrollX -= (p.x-last.x)/cam.zoom;
-      cam.scrollY -= (p.y-last.y)/cam.zoom;
-      last={x:p.x,y:p.y};
+    let dragging = false, last = { x: 0, y: 0 };
+    this.input.on('pointerdown', p => { if (p.rightButtonDown()) { dragging = true; last = { x: p.x, y: p.y }; } });
+    this.input.on('pointerup',   () => dragging = false);
+    this.input.on('pointermove', p => {
+      if (!dragging) return;
+      const cam = this.cameras.main;
+      cam.scrollX -= (p.x - last.x) / cam.zoom;
+      cam.scrollY -= (p.y - last.y) / cam.zoom;
+      last = { x: p.x, y: p.y };
     });
 
-    // --- Puente UI -> GameScene: acciones por evento ---
-// dentro de create()
-this._onUIAction = ({ actionType }) => {
-  switch (actionType) {
-    case 'ARAR': return this.plowSelected();
-    case 'REGAR': return this.waterSelected();
-    case 'SEMBRAR': return this.plantSelected();
-    case 'COSECHAR': return this.harvestSelected();
-    case 'UPGRADE_TECH': return this.openTechTree();
-    case 'SCAN_REGION': return this.scanRegion();
-    case 'SELL_HARVEST': return this.sellHarvest();
-  }
-};
-this.game.events.on('action:perform', this._onUIAction);
+    // Bridge UI → GameScene (acciones por evento)
+    this._onUIAction = ({ actionType }) => {
+      switch (actionType) {
+        case 'ARAR': return this.plowSelected();
+        case 'REGAR': return this.waterSelected();
+        case 'SEMBRAR': return this.plantSelected();
+        case 'COSECHAR': return this.harvestSelected();
+        case 'UPGRADE_TECH': return this.openTechTree();
+        case 'SCAN_REGION': return this.scanRegion();
+        case 'SELL_HARVEST': return this.sellHarvest();
+      }
+    };
+    this.game.events.on('action:perform', this._onUIAction);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.game.events.off('action:perform', this._onUIAction);
+    });
 
-this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-  this.game.events.off('action:perform', this._onUIAction);
-});
-
-
-// Limpieza del listener al cerrar la escena
-this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-  this.game.events.off('action:perform');
-});
-
-
-    if (!this.scene.isActive('UI')) {
-      this.scene.launch('UI');
-  }
+    if (!this.scene.isActive('UI')) this.scene.launch('UI');
   }
 
-  selectParcela(id){
-    this.selectedParcelaId = id;
-    const p = repoGet('parcelas', id);
+  // Selección por BLOQUE
+  selectBlock(blockId) {
+    const parcela = this.parcelaByBlockId.get(blockId);
+    if (!parcela) return;
+
+    this.selectedParcelaId = parcela.id;
+
+    // datos para el panel
+    const p = repoGet('parcelas', parcela.id);
     const c = p?.cultivoId ? repoGet('cultivos', p.cultivoId) : null;
-    const agua = p?.recursos.map(rid => repoGet('recursos', rid)).find(r => r?.tipo==='AGUA');
+    const agua = p?.recursos.map(rid => repoGet('recursos', rid)).find(r => r?.tipo === 'AGUA');
 
     this.game.events.emit('inspect:parcela', {
-      id: p?.id, saludSuelo: p?.saludSuelo?.toFixed(2),
+      id: p?.id,
+      saludSuelo: p?.saludSuelo?.toFixed(2),
       cultivo: c ? { tipo: c.tipo, etapa: c.etapa, progreso: c.progreso.toFixed(2) } : null,
       agua: agua ? { nivel: Number(agua.nivel).toFixed(2) } : null
     });
 
-    const sprite = this.spriteByParcela.get(id);          // 👈
-    this.drawSelector(p.x, p.y, sprite);                  // 👈 pasa el sprite
+    // Dibuja de inmediato el contorno del BLOQUE 9×9 completo
+    this.drawBlockSelector(blockId);
   }
 
-  drawSelector(_gx, _gy, sprite){
-    const SEL_Y_SCALE = 0.5;
+
+  drawBlockSelector(blockId){
+    const parcela = this.parcelaByBlockId.get(blockId);
+    if (!parcela) return;
+
     const g = this.selector || (this.selector = this.add.graphics());
     g.clear().lineStyle(2, 0x60a5fa, 1);
 
-    if (sprite) {
-      const poly = sprite.getData('topPoly');
-      if (poly) {
-        const sx = sprite.x, sy = sprite.y;
-        const sxScale = sprite.scaleX ?? 1;
-        const syScale = sprite.scaleY ?? 1;
+    const x0 = parcela.x, y0 = parcela.y;           // en coords mundo (grid)
+    const w  = parcela.w, h  = parcela.h;
 
-        // y local más alto (punta superior del rombo)
-        let topLocalY = Infinity;
-        for (const p of poly.points) if (p.y < topLocalY) topLocalY = p.y;
+    // esquinas del bloque (grid → pantalla)
+    const a = isoProject(x0,     y0,     this.offX, this.offY); // top
+    const b = isoProject(x0+w,   y0,     this.offX, this.offY); // right
+    const c = isoProject(x0+w,   y0+h,   this.offX, this.offY); // bottom
+    const d = isoProject(x0,     y0+h,   this.offX, this.offY); // left
 
-        // escalamos hacia la punta: y' = top + (y - top) * scale
-        const pts = poly.points.map(p => ({
-          x: sx + p.x * sxScale,
-          y: sy + (topLocalY + (p.y - topLocalY) * SEL_Y_SCALE) * syScale
-        }));
+    const sy = Math.max(a.sy, b.sy, c.sy, d.sy);
+    g.setDepth(sy + 9999);
 
-        g.setDepth(sy + 9999).strokePoints(pts, true);
-        return;
-      }
-    }
-    // fallback (solo si no hay sprite)
-    const { sx, sy } = isoProject(_gx, _gy, this.offX, this.offY);
-    const halfW = PROJ_W/2, halfH = PROJ_H/2;
-    g.setDepth(sy + 9999).strokePoints(
-      [{x:sx, y:sy-halfH}, {x:sx+halfW, y:sy}, {x:sx, y:sy+halfH}, {x:sx-halfW, y:sy}],
-      true
-    );
-    g.lineStyle(2, 0x60a5fa, 1).strokePoints(pts, true);
-    g.fillStyle(0x60a5fa, 0.06).fillPoints(pts, true); // sutil
+    const pts = [{x:a.sx,y:a.sy},{x:b.sx,y:b.sy},{x:c.sx,y:c.sy},{x:d.sx,y:d.sy}];
+    g.strokePoints(pts, true);
+    g.fillStyle(0x60a5fa, 0.06).fillPoints(pts, true);
   }
 
+  // === Acciones aplicadas al BLOQUE seleccionado ===
   plowSelected() {
     if (!this.selectedParcelaId) return;
     const p = repoGet('parcelas', this.selectedParcelaId);
-    const spr = this.spriteByParcela.get(p?.id);
-    if (!p || !spr) return;
+    if (!p) return;
 
     if (p.arada) { this.game.events.emit('toast',{type:'info', msg:`${p.id} ya está arada.`}); return; }
-
-    // (si recalculas polígono por la nueva textura, hazlo aquí)
     p.arada = true;
-    applySoilVisual(this, p.id);          // 👈 textura Lava3 + multiplicador
+    applyBlockVisual(this, p.id);
     this.game.events.emit('toast', { type:'ok', msg:`Araste ${p.id}.` });
-    this.drawSelector(p.x, p.y, spr);
+    // redibuja selector
+    const blockId = this.blockIdByParcelaId.get(p.id);
+    if (blockId) this.drawBlockSelector(blockId);
   }
 
-
   waterSelected() {
-    if (this._cooldowns.water > 0) return;
-    this._cooldowns.water = 400; // ms    const selId = this.selectedParcelaId;
-    
+    if ((this._cooldowns?.water || 0) > 0) return;
+    this._cooldowns.water = 400;
+
+    const selId = this.selectedParcelaId;
     if (!selId) return;
 
     const p = repoGet('parcelas', selId);
@@ -569,26 +549,24 @@ this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
 
     if (!agua) { this.game.events.emit('toast',{type:'warn',msg:`La parcela ${p.id} no tiene AGUA.`}); return; }
 
-    // lógica de agua
     agua.nivel = Math.min(1, (agua.nivel ?? 0) + 0.25);
 
-    // marca mojado un rato (ajusta duración)
     const WET_DURATION = 1200;
     p.wetUntil = (p.wetUntil && State.clock < p.wetUntil)
       ? p.wetUntil + Math.floor(WET_DURATION*0.5)
       : State.clock + WET_DURATION;
 
-    applySoilVisual(this, p.id);  // 👈 actualiza (seca→fill oscuro, arada→tint compuesto)
+    applyBlockVisual(this, p.id);
     this.game.events.emit('toast', { type:'ok', msg:`Riego aplicado a ${p.id}.` });
 
     // limpia alertas y refresca panel
     repoAll('alertas').forEach(a => { if (a.parcelaId === p.id) a.visible = false; });
-    this.selectParcela(p.id);
+    const blockId = this.blockIdByParcelaId.get(p.id);
+    if (blockId) this.drawBlockSelector(blockId);
   }
 
-
   harvestSelected(){
-    if(!this.selectedParcelaId) return;
+    if (!this.selectedParcelaId) return;
     const p = repoGet('parcelas', this.selectedParcelaId);
     const c = p?.cultivoId ? repoGet('cultivos', p.cultivoId) : null;
     const player = findFirstPlayer();
@@ -596,104 +574,99 @@ this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       player.cartera += 30;
       c.etapa='SIEMBRA'; c.progreso=0;
       this.game.events.emit('toast', { type:'ok', msg:`Cosechado ${c.tipo} en ${p.id}. +30` });
-      this.selectParcela(p.id);
+      const blockId = this.blockIdByParcelaId.get(p.id);
+      if (blockId) this.drawBlockSelector(blockId);
     } else {
       this.game.events.emit('toast', { type:'warn', msg:'Aún no está listo.' });
     }
   }
 
-// Crear/sembrar cultivo en la parcela seleccionada
-async plantSelected() {
-  if (!this.selectedParcelaId) {
-    this.game.events.emit('toast', { type:'warn', msg:'Selecciona una parcela primero.' });
-    return;
+  async plantSelected() {
+    if (!this.selectedParcelaId) {
+      this.game.events.emit('toast', { type:'warn', msg:'Selecciona una parcela primero.' });
+      return;
+    }
+    const p = repoGet('parcelas', this.selectedParcelaId);
+    if (!p) return;
+
+    if (p.cultivoId) {
+      const c = repoGet('cultivos', p.cultivoId);
+      this.game.events.emit('toast', { type:'info', msg:`${p.id} ya tiene ${c?.tipo || 'cultivo'}.` });
+      return;
+    }
+
+    const player = findFirstPlayer();
+    if (!spend(player, 15)) {
+      this.game.events.emit('toast', { type:'warn', msg:'Fondos insuficientes (15).' });
+      return;
+    }
+
+    const cultivo = Factory.createCultivo({
+      tipo: 'MAIZ',
+      etapa: 'SIEMBRA',
+      progreso: 0,
+      consumoAgua: 1.0
+    });
+    p.cultivoId = cultivo.id;
+
+    this.game.events.emit('toast', { type:'ok', msg:`Sembraste ${cultivo.tipo} en ${p.id}.` });
+    const blockId = this.blockIdByParcelaId.get(p.id);
+    if (blockId) this.drawBlockSelector(blockId);
   }
-  const p = repoGet('parcelas', this.selectedParcelaId);
-  if (!p) return;
 
-  // Si ya hay cultivo, evita duplicar
-  if (p.cultivoId) {
-    const c = repoGet('cultivos', p.cultivoId);
-    this.game.events.emit('toast', { type:'info', msg:`${p.id} ya tiene ${c?.tipo || 'cultivo'}.` });
-    return;
+  openTechTree() {
+    this.game.events.emit('toast', { type:'ok', msg:'Tech Tree (WIP): Riego por goteo, sensores, energía solar…' });
   }
 
-  // Coste simple de siembra
-  const player = findFirstPlayer();
-  if (!spend(player, 15)) {
-    this.game.events.emit('toast', { type:'warn', msg:'Fondos insuficientes (15).' });
-    return;
+  scanRegion() {
+    if (!this.selectedParcelaId) {
+      this.game.events.emit('toast', { type:'warn', msg:'Selecciona una parcela para escanear.' });
+      return;
+    }
+    const p = repoGet('parcelas', this.selectedParcelaId);
+    if (!p) return;
+
+    const agua = (p.recursos||[]).map(rid => repoGet('recursos', rid)).find(r => r?.tipo==='AGUA');
+    const smapRZSM = Number(agua?.nivel ?? 0);
+    const ndvi     = Number(p.saludSuelo ?? 0.5);
+    const heat     = Phaser.Math.Clamp(Math.random()*0.6, 0, 1);
+
+    const msg =
+      `🛰️ Scan NASA\n` +
+      `• SMAP (RZSM): ${(smapRZSM*100).toFixed(0)}%\n` +
+      `• NDVI (salud): ${(ndvi*100).toFixed(0)}%\n` +
+      `• Heat stress: ${(heat*100).toFixed(0)}%`;
+    this.game.events.emit('toast', { type:'ok', msg });
   }
 
-  // Crea un cultivo sencillo (MVP)
-  const cultivo = Factory.createCultivo({
-    tipo: 'MAIZ',   // cambia por menú/semilla luego
-    etapa: 'SIEMBRA',
-    progreso: 0,
-    consumoAgua: 1.0
-  });
-  p.cultivoId = cultivo.id;
-
-  this.game.events.emit('toast', { type:'ok', msg:`Sembraste ${cultivo.tipo} en ${p.id}.` });
-  this.selectParcela(p.id);
-}
-
-// “Tech tree” placeholder (abre modal/scene más adelante)
-openTechTree() {
-  // Aquí puedes lanzar otra escena o un overlay de upgrades
-  this.game.events.emit('toast', { type:'ok', msg:'Tech Tree (WIP): Riego por goteo, sensores, energía solar…' });
-}
-
-// Escaneo rápido (MVP) – convierte estado a “lecturas NASA” y alerta
-scanRegion() {
-  if (!this.selectedParcelaId) {
-    this.game.events.emit('toast', { type:'warn', msg:'Selecciona una parcela para escanear.' });
-    return;
-  }
-  const p = repoGet('parcelas', this.selectedParcelaId);
-  if (!p) return;
-
-  // Lecturas simplificadas
-  const agua = (p.recursos||[]).map(rid => repoGet('recursos', rid)).find(r => r?.tipo==='AGUA');
-  const smapRZSM = Number(agua?.nivel ?? 0);           // SMAP (raíz) normalizado 0..1
-  const ndvi     = Number(p.saludSuelo ?? 0.5);        // proxy NDVI (MVP)
-  const heat     = Phaser.Math.Clamp(Math.random()*0.6, 0, 1); // proxy estrés térmico
-
-  const msg =
-    `🛰️ Scan NASA\n` +
-    `• SMAP (RZSM): ${(smapRZSM*100).toFixed(0)}%\n` +
-    `• NDVI (salud): ${(ndvi*100).toFixed(0)}%\n` +
-    `• Heat stress: ${(heat*100).toFixed(0)}%`;
-
-  this.game.events.emit('toast', { type:'ok', msg });
-}
-
-// Vende todas las parcelas en estado de COSECHA (MVP)
-sellHarvest() {
-  let total = 0;
-  for (const p of repoAll('parcelas')) {
-    if (!p.cultivoId) continue;
-    const c = repoGet('cultivos', p.cultivoId);
-    if (c?.etapa === 'COSECHA' && c.progreso >= 1) {
-      total += 30;           // precio plano (MVP)
-      c.etapa = 'SIEMBRA';   // resetea para resembrar
-      c.progreso = 0;
+  sellHarvest() {
+    let total = 0;
+    for (const p of repoAll('parcelas')) {
+      if (!p.cultivoId) continue;
+      const c = repoGet('cultivos', p.cultivoId);
+      if (c?.etapa === 'COSECHA' && c.progreso >= 1) {
+        total += 30;
+        c.etapa = 'SIEMBRA';
+        c.progreso = 0;
+      }
+    }
+    const player = findFirstPlayer();
+    if (total > 0) {
+      player.cartera = (player.cartera || 0) + total;
+      this.game.events.emit('toast', { type:'ok', msg:`Venta realizada: +${total}` });
+    } else {
+      this.game.events.emit('toast', { type:'warn', msg:'No hay cosechas listas.' });
     }
   }
-  const player = findFirstPlayer();
-  if (total > 0) {
-    player.cartera = (player.cartera || 0) + total;
-    this.game.events.emit('toast', { type:'ok', msg:`Venta realizada: +${total}` });
-  } else {
-    this.game.events.emit('toast', { type:'warn', msg:'No hay cosechas listas.' });
-  }
-}
 
-  
   update(_, delta) {
+    // cooldowns
+    const dec = delta;
+    for (const k in this._cooldowns) this._cooldowns[k] = Math.max(0, (this._cooldowns[k] || 0) - dec);
+
     const cam = this.cameras.main;
     const dt = delta / 1000;
-    const v = this.camSpeed / cam.zoom; // velocidad “constante” con zoom
+    const v = this.camSpeed / cam.zoom;
 
     if (this.cursors?.left.isDown)  cam.scrollX -= v * dt;
     if (this.cursors?.right.isDown) cam.scrollX += v * dt;
@@ -708,16 +681,14 @@ sellHarvest() {
     tickSim(delta);
     tickClimate(); tickCrops(); tickPlagues(); tickAlerts();
 
-    // en update(), por ejemplo cada 15 ticks
+    // secado periódico
     if ((State.clock % 15) === 0) {
       for (const p of repoAll('parcelas')) {
         if (p.wetUntil && State.clock >= p.wetUntil) {
           p.wetUntil = 0;
-          applySoilVisual(this, p.id); // vuelve a seca (fill) o arada (tint base)
+          applyBlockVisual(this, p.id);
         }
       }
     }
-
   }
-
 }
