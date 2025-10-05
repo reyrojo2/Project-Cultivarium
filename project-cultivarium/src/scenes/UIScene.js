@@ -181,48 +181,78 @@ export default class UIScene extends Phaser.Scene {
     container.add([this.alertsTitle, this.alertsText]);
   }
 
-  // ---------- Panel de Acciones ----------
-  populateActionPanel(panel, colors) {
-    const container = panel.container;
-    const W = panel.width;
-    let y = 20;
+// ---------- Panel de Acciones ----------
+populateActionPanel(panel, colors) {
+  const container = panel.container;
+  const W = panel.width;
+  let y = 20;
 
-    const title = this.add.text(W / 2, y, 'Decisiones', { fontSize: '24px', color: colors.textPrimary, fontStyle: 'bold' }).setOrigin(0.5, 0);
-    container.add(title);
-    y += 60;
+  const title = this.add.text(W / 2, y, 'Decisiones', {
+    fontSize: '24px',
+    color: colors.textPrimary,
+    fontStyle: 'bold'
+  }).setOrigin(0.5, 0);
+  container.add(title);
+  y += 60;
 
-    const makeBtn = (label, onDirectCall, eventType, feedbackMsg, feedbackColor) => {
-      const btn = this.createActionButton(label, y, () => {
-        const gameScene = this.game.scene.get('Game');
-        if (gameScene && typeof gameScene[onDirectCall] === 'function') {
-          gameScene[onDirectCall]();
-        } else {
-          this.game.events.emit('action:perform', { actionType: eventType });
-        }
-        this.showActionFeedback(feedbackMsg, feedbackColor);
-      }, W, colors);
-      container.add(btn.elements);
-      this.actionButtons.push(btn);
-      y += 65;
-      return btn;
-    };
+  // Reinicia el registro de botones (UI Scene -> update() los gestiona)
+  this.actionButtons = [];
 
-    // Botones clave
-    makeBtn('🚜 Arar',     'plowSelected',   'ARAR',         '🚜 Arado ejecutado', colors.feedback.success);
-    makeBtn('💧 Regar',    'waterSelected',  'REGAR',        '💧 Riego ejecutado', colors.feedback.success);
-    makeBtn('🌱 Sembrar',  'plantSelected',  'SEMBRAR',      '🌱 Sembrando Cultivo', colors.feedback.success);
-    makeBtn('🌾 Cosechar', 'harvestSelected','COSECHAR',     '🌾 Cosecha intentada', 0xfbbf24);
+  // Helper: ejecuta acción con feedback + cooldown visual/táctil
+  const runAction = (label, eventType, feedbackText, feedbackColor, directFnName = null, cooldownMs = 500) => {
+    const btn = this.createActionButton(label, y, async () => {
+      // evita doble click mientras está en cooldown
+      if (btn.coolingDown) return;
+      btn.coolingDown = true;
 
-    // Separador
-    const sep = this.add.graphics().fillStyle(colors.panelBorder, 0.5).fillRect(16, y += 40, W - 32, 2);
-    container.add(sep);
-    y += 12;
+      // 1) dispara acción real (directa a GameScene si existe método, si no, por evento)
+      const gameScene = this.game.scene.get('Game');
+      if (directFnName && gameScene && typeof gameScene[directFnName] === 'function') {
+        try { await gameScene[directFnName](); } catch(e) { /* opcional: log */ }
+      } else {
+        this.game.events.emit('action:perform', { actionType: eventType });
+      }
 
-    // Avanzados / Tech
-    makeBtn('⚙️ Mejorar (Tech)',    null, 'UPGRADE_TECH', '⚙️ Abriendo Tech-Tree', colors.dataAccent);
-    makeBtn('🛰️ Escanear (Data)', null, 'SCAN_REGION', '🛰️ Extrayendo Data NASA...', colors.dataAccent);
-    makeBtn('💰 Vender Cosecha',   null, 'SELL_HARVEST','💰 Mercado actualizado', colors.bar.money);
-  }
+      // 2) feedback inmediato en pantalla
+      this.showActionFeedback(feedbackText, feedbackColor);
+
+      // 3) micro-animación “pressed”
+      this.tweens.add({ targets: [btn.bg, btn.text], scale: 0.96, duration: 80, yoyo: true, ease: 'Quad.easeInOut' });
+
+      // 4) enfriamiento (cambia color y desactiva momentáneamente)
+      const prevColor = btn.bg.fillColor;
+      btn.bg.fillColor = 0x445c3a; // tono más oscuro temporal
+      btn.bg.disableInteractive();
+
+      setTimeout(() => {
+        btn.bg.fillColor = prevColor;
+        btn.bg.setInteractive({ useHandCursor: true });
+        btn.coolingDown = false;
+      }, cooldownMs);
+    }, W, colors);
+
+    container.add(btn.elements);
+    this.actionButtons.push(btn);
+    y += 65;
+    return btn;
+  };
+
+  // --- BOTONES CLAVE (DECISIONES AGRÍCOLAS) ---
+  runAction('🚜 Arar',          'ARAR',         '🚜 Arado ejecutado',          colors.feedback.success, 'plowSelected');
+  runAction('💧 Regar',         'REGAR',        '💧 Riego ejecutado',          colors.feedback.success, 'waterSelected');
+  runAction('🌱 Sembrar',       'SEMBRAR',      '🌱 Siembra iniciada',         colors.feedback.success, 'plantSelected');
+  runAction('🌾 Cosechar',      'COSECHAR',     '🌾 Cosecha intentada',        0xfbbf24,               'harvestSelected');
+
+  // Separador
+  const sep = this.add.graphics().fillStyle(colors.panelBorder, 0.5).fillRect(16, y += 40, W - 32, 2);
+  container.add(sep);
+  y += 12;
+
+  // --- AVANZADOS / TECNOLOGÍA & DATOS ---
+  runAction('⚙️ Mejorar (Tech)',   'UPGRADE_TECH', '⚙️ Abriendo Tech-Tree',      colors.dataAccent, null, 600);
+  runAction('🛰️ Escanear (Data)',  'SCAN_REGION',  '🛰️ Extrayendo Data NASA...', colors.dataAccent, null, 600);
+  runAction('💰 Vender Cosecha',    'SELL_HARVEST', '💰 Mercado actualizado',     colors.bar.money,  null, 600);
+}
     
   // ---------- Feedback flotante ----------
   showActionFeedback(msg, colorHex) {

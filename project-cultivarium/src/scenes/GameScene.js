@@ -450,6 +450,26 @@ export default class GameScene extends Phaser.Scene {
       last={x:p.x,y:p.y};
     });
 
+    // --- Puente UI -> GameScene: acciones por evento ---
+this.game.events.on('action:perform', ({ actionType }) => {
+  switch (actionType) {
+    case 'ARAR':          return this.plowSelected();
+    case 'REGAR':         return this.waterSelected();
+    case 'SEMBRAR':       return this.plantSelected();
+    case 'COSECHAR':      return this.harvestSelected();
+    case 'UPGRADE_TECH':  return this.openTechTree();
+    case 'SCAN_REGION':   return this.scanRegion();
+    case 'SELL_HARVEST':  return this.sellHarvest();
+    default: break;
+  }
+});
+
+// Limpieza del listener al cerrar la escena
+this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+  this.game.events.off('action:perform');
+});
+
+
     if (!this.scene.isActive('UI')) {
       this.scene.launch('UI');
   }
@@ -575,6 +595,94 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
+// Crear/sembrar cultivo en la parcela seleccionada
+async plantSelected() {
+  if (!this.selectedParcelaId) {
+    this.game.events.emit('toast', { type:'warn', msg:'Selecciona una parcela primero.' });
+    return;
+  }
+  const p = repoGet('parcelas', this.selectedParcelaId);
+  if (!p) return;
+
+  // Si ya hay cultivo, evita duplicar
+  if (p.cultivoId) {
+    const c = repoGet('cultivos', p.cultivoId);
+    this.game.events.emit('toast', { type:'info', msg:`${p.id} ya tiene ${c?.tipo || 'cultivo'}.` });
+    return;
+  }
+
+  // Coste simple de siembra
+  const player = findFirstPlayer();
+  if (!spend(player, 15)) {
+    this.game.events.emit('toast', { type:'warn', msg:'Fondos insuficientes (15).' });
+    return;
+  }
+
+  // Crea un cultivo sencillo (MVP)
+  const cultivo = Factory.createCultivo({
+    tipo: 'MAIZ',   // cambia por menú/semilla luego
+    etapa: 'SIEMBRA',
+    progreso: 0,
+    consumoAgua: 1.0
+  });
+  p.cultivoId = cultivo.id;
+
+  this.game.events.emit('toast', { type:'ok', msg:`Sembraste ${cultivo.tipo} en ${p.id}.` });
+  this.selectParcela(p.id);
+}
+
+// “Tech tree” placeholder (abre modal/scene más adelante)
+openTechTree() {
+  // Aquí puedes lanzar otra escena o un overlay de upgrades
+  this.game.events.emit('toast', { type:'ok', msg:'Tech Tree (WIP): Riego por goteo, sensores, energía solar…' });
+}
+
+// Escaneo rápido (MVP) – convierte estado a “lecturas NASA” y alerta
+scanRegion() {
+  if (!this.selectedParcelaId) {
+    this.game.events.emit('toast', { type:'warn', msg:'Selecciona una parcela para escanear.' });
+    return;
+  }
+  const p = repoGet('parcelas', this.selectedParcelaId);
+  if (!p) return;
+
+  // Lecturas simplificadas
+  const agua = (p.recursos||[]).map(rid => repoGet('recursos', rid)).find(r => r?.tipo==='AGUA');
+  const smapRZSM = Number(agua?.nivel ?? 0);           // SMAP (raíz) normalizado 0..1
+  const ndvi     = Number(p.saludSuelo ?? 0.5);        // proxy NDVI (MVP)
+  const heat     = Phaser.Math.Clamp(Math.random()*0.6, 0, 1); // proxy estrés térmico
+
+  const msg =
+    `🛰️ Scan NASA\n` +
+    `• SMAP (RZSM): ${(smapRZSM*100).toFixed(0)}%\n` +
+    `• NDVI (salud): ${(ndvi*100).toFixed(0)}%\n` +
+    `• Heat stress: ${(heat*100).toFixed(0)}%`;
+
+  this.game.events.emit('toast', { type:'ok', msg });
+}
+
+// Vende todas las parcelas en estado de COSECHA (MVP)
+sellHarvest() {
+  let total = 0;
+  for (const p of repoAll('parcelas')) {
+    if (!p.cultivoId) continue;
+    const c = repoGet('cultivos', p.cultivoId);
+    if (c?.etapa === 'COSECHA' && c.progreso >= 1) {
+      total += 30;           // precio plano (MVP)
+      c.etapa = 'SIEMBRA';   // resetea para resembrar
+      c.progreso = 0;
+    }
+  }
+  const player = findFirstPlayer();
+  if (total > 0) {
+    player.cartera = (player.cartera || 0) + total;
+    this.game.events.emit('toast', { type:'ok', msg:`Venta realizada: +${total}` });
+  } else {
+    this.game.events.emit('toast', { type:'warn', msg:'No hay cosechas listas.' });
+  }
+}
+
+  
   update(_, delta) {
     const cam = this.cameras.main;
     const dt = delta / 1000;
