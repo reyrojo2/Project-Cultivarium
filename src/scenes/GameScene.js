@@ -16,6 +16,9 @@ import { DECOR, addDecor } from '../map/decor.js';
 const PROJ_W = 256;
 const PROJ_H = 128;
 
+// 0..1 → curvas suaves
+const smoothstep = (t)=> t*t*(3-2*t);
+
 function isoProject(gx, gy, offX, offY) {
   return {
     sx: Math.round(offX + (gx - gy) * (PROJ_W / 2)),
@@ -215,6 +218,9 @@ export default class GameScene extends Phaser.Scene {
     this.blockIdByParcelaId = new Map();// parcelaId -> blockId
     this.keyA = null;
     this._cooldowns = { water: 0, plow: 0, harvest: 0, plant: 0 };
+    this.decorEntries = [];      // ← entradas {sprite, shadow, def} de addDecor()
+    this.timeOfDay = 0;          // 0..1
+    this.dayLengthMs = 120000;   // 120 s por “día” (ajústalo)
   }
 
   create() {
@@ -323,22 +329,25 @@ export default class GameScene extends Phaser.Scene {
     {
       const gx = Math.max(0, Math.floor(grassBorder / 2));
       const gy = Math.max(0, Math.floor((TOTAL_H - 2) / 2));
-      place(this, isoProject, occ, world, gx, gy, 'barn',   { projW: PROJ_W });
+      const e = place(this, isoProject, occ, world, gx, gy, 'barn', { projW: PROJ_W }); // ⬅ una sola vez
+      if (e) this.decorEntries.push(e);
     }
 
     // --- SILO (380x760, footprint 2x2) en pasto derecha ---
     {
       const gx = Math.min(TOTAL_W - 2, TOTAL_W - Math.ceil(grassBorder / 2) - 2);
       const gy = Math.max(0, Math.floor((TOTAL_H - 2) / 2) - 2);
-      place(this, isoProject, occ, world, gx, gy, 'silo',   { projW: PROJ_W });
+      const e = place(this, isoProject, occ, world, gx, gy, 'silo', { projW: PROJ_W });
+      if (e) this.decorEntries.push(e);
     }
 
     // --- TRACTOR (1x1) cerca de la primera parcela ---
     {
       const block = (blocks && blocks[0]) ? blocks[0] : null;
       const gx = block ? (grassBorder + block.x0 + block.w - 1) : (FARM_MIN_X + 1);
-      const gy = block ? (grassBorder + block.y0 + 1)             : (FARM_MIN_Y + 1);
-      place(this, isoProject, occ, world, gx, gy, 'tractor',{ projW: PROJ_W });
+      const gy = block ? (grassBorder + block.y0 + 1)           : (FARM_MIN_Y + 1);
+      const e = place(this, isoProject, occ, world, gx, gy, 'tractor', { projW: PROJ_W });
+      if (e) this.decorEntries.push(e);
     }
 
     // --- Árboles (1x1) al borde superior e inferior del pasto ---
@@ -346,7 +355,8 @@ export default class GameScene extends Phaser.Scene {
       const tryPlaceTreeRow = (gyRow) => {
         for (let gx = 1; gx < TOTAL_W - 1; gx += 4) {
           if (world[gyRow][gx] === T.GRASS) {
-            place(this, isoProject, occ, world, gx, gyRow, 'tree');
+            const e = place(this, isoProject, occ, world, gx, gyRow, 'tree', { projW: PROJ_W });
+            if (e) this.decorEntries.push(e);
           }
         }
       };
@@ -362,7 +372,9 @@ export default class GameScene extends Phaser.Scene {
         const gy = Phaser.Math.Between(1, TOTAL_H - 2);
         if (world[gy][gx] !== T.GRASS) continue;
         const name = (Math.random() < 0.5) ? 'rock1' : 'rock2';
-        if (place(this, isoProject, occ, world, gx, gy, name)) {
+        const e = place(this, isoProject, occ, world, gx, gy, name);
+        if (e) {
+          this.decorEntries.push(e);
           occupyRect(occ, gx - 1, gy - 1, 3, 3); // dejar aire
         }
       }
@@ -377,7 +389,8 @@ export default class GameScene extends Phaser.Scene {
           const gx = Phaser.Math.Clamp(cx + dx, 0, TOTAL_W - 1);
           const gy = Phaser.Math.Clamp(cy + dy, 0, TOTAL_H - 1);
           if (world[gy][gx] !== T.GRASS) continue;
-          place(this, isoProject, occ, world, gx, gy, 'bush1');
+          const e = place(this, isoProject, occ, world, gx, gy, 'bush1');
+          if (e) this.decorEntries.push(e);
         }
       };
       cluster(Math.floor(grassBorder / 2), Math.floor(grassBorder / 2));
@@ -420,6 +433,13 @@ export default class GameScene extends Phaser.Scene {
     this.keyA = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyR = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.keyC = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
+
+    // === Overlay ambiente para día/noche ===
+    const w = this.scale.width, h = this.scale.height;
+    this.ambient = this.add.rectangle(0, 0, w, h, 0x000000, 0)
+      .setOrigin(0)
+      .setScrollFactor(0)
+      .setDepth(1e6);
 
     // HUD breve
     this.add.text(16, 8,
@@ -658,9 +678,11 @@ export default class GameScene extends Phaser.Scene {
       this.game.events.emit('toast', { type:'warn', msg:'No hay cosechas listas.' });
     }
   }
+  
 
   update(_, delta) {
     // cooldowns
+    this.tickDayNight(delta);
     const dec = delta;
     for (const k in this._cooldowns) this._cooldowns[k] = Math.max(0, (this._cooldowns[k] || 0) - dec);
 
@@ -691,4 +713,67 @@ export default class GameScene extends Phaser.Scene {
       }
     }
   }
+
+  tickDayNight(delta) {
+    // avanza el tiempo (0..1)
+    this.timeOfDay = (this.timeOfDay + delta / this.dayLengthMs) % 1;
+
+    // fases
+    const t = this.timeOfDay;
+    let ambient = 0.0;  // 0 = claro, 1 = oscuro
+    let sunAlt  = 0.0;  // 0 = bajo (sombras largas), 1 = alto (cortas)
+    let sunAzim = 0.0;  // 0=este→, 0.5=oeste←
+
+    if (t < 0.15) {                // amanecer
+      const u = smoothstep(t / 0.15);
+      ambient = 0.85 - 0.55*u;
+      sunAlt  = 0.15 + 0.65*u;
+      sunAzim = 0.15;
+    } else if (t < 0.75) {         // día
+      const u = (t - 0.15) / 0.60;
+      ambient = 0.30 - 0.10*Math.cos(Math.PI*u);
+      sunAlt  = 0.80 + 0.15*Math.cos(Math.PI*u);
+      sunAzim = 0.25 + 0.50*u;
+    } else if (t < 0.90) {         // atardecer
+      const u = smoothstep((t - 0.75) / 0.15);
+      ambient = 0.30 + 0.40*u;
+      sunAlt  = 0.60 - 0.45*u;
+      sunAzim = 0.75;
+    } else {                       // noche
+      const u = (t - 0.90) / 0.10;
+      ambient = 0.70 + 0.20*u;
+      sunAlt  = 0.10;
+      sunAzim = 0.75;
+    }
+
+    // overlay ambiente (oscurece/aclara)
+    if (this.ambient) this.ambient.setAlpha(Phaser.Math.Clamp(ambient, 0, 1));
+
+    // dirección del “sol” en pantalla
+    const angle = (sunAzim * Math.PI);
+    const dirX =  Math.cos(angle);
+    const dirY =  Math.sin(angle) * 0.6;   // iso
+
+    // longitud/opacidad/aplastado de sombra
+    const len     = Phaser.Math.Linear(1.8, 0.6, Phaser.Math.Clamp(sunAlt, 0, 1));
+    const alphaK  = Phaser.Math.Linear(0.9, 0.45, Phaser.Math.Clamp(sunAlt, 0, 1));
+    const squish  = Phaser.Math.Linear(1.0, 0.75, Phaser.Math.Clamp(sunAlt, 0, 1));
+
+    // actualiza sombras de decor
+    for (const e of this.decorEntries) {
+      if (!e?.sprite || !e?.shadow) continue;
+      const base = e.shadow.getData('shadowBase') || {
+        dx:0, dy:0, w:e.shadow.width, h:e.shadow.height, alpha:0.25
+      };
+
+      const sx = e.sprite.x + (base.dx * len * dirX);
+      const sy = e.sprite.y + (base.dy * len * (0.6 + 0.4*dirY));
+      e.shadow.setPosition(sx, sy);
+
+      e.shadow.setDisplaySize(base.w * len, base.h * squish);
+      e.shadow.setAlpha((base.alpha ?? 0.25) * alphaK);
+    }
+  }
+
+
 }

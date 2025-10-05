@@ -27,17 +27,17 @@ export function addDecor(scene, isoProject, gx, gy, name, opts = {}) {
   const targetWidthPx = (def.fitToFootprint ?? true) ? fw * projW : def.srcW;
   let scale = (targetWidthPx / def.srcW) * (def.boost ?? 1);
 
-  // Sombra
   const sh = def.shadow || { dx:0, dy:0, w:100, h:40, alpha:0.25 };
   const shadow = scene.add.ellipse(
-    sx + (sh.dx||0), sy + (sh.dy||0),
-    (sh.w||100) * scale, (sh.h||40) * scale,
-    0x000000, sh.alpha ?? 0.25
-  )
-  .setOrigin(0.5)
-  .setDepth(sy - 2);
+      sx + (sh.dx||0), sy + (sh.dy||0),
+      sh.w||100, sh.h||40, 0x000000, sh.alpha ?? 0.25
+    )
+    .setOrigin(0.5)
+    .setDepth(sy - 2);
 
-  // Sprite
+  // ⬅️ Guarda los parámetros base para el ciclo día-noche
+  shadow.setData('shadowBase', { dx: sh.dx||0, dy: sh.dy||0, w: sh.w||100, h: sh.h||40, alpha: sh.alpha ?? 0.25 });
+
   const spr = scene.add.image(sx, sy, def.key)
     .setOrigin(0.5, 1)
     .setScale(scale)
@@ -46,4 +46,3 @@ export function addDecor(scene, isoProject, gx, gy, name, opts = {}) {
   spr.setData('decor', { name, gx, gy, fw, fh });
   return { sprite: spr, shadow };
 }
-
