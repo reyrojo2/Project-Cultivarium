@@ -1,11 +1,9 @@
 import Phaser from 'phaser';
 
 export default class BootScene extends Phaser.Scene {
-  constructor() {
-    super('Boot');
+  constructor(){ super('Boot'); }
+  create(){
+    console.log('[Boot] create');
+    this.scene.start('Preload');
   }
-
-  preload() { /* Carga mínima (logos, fuentes) si fuera necesario. */ }
-
-  create() { this.scene.start('Preload'); }
 }

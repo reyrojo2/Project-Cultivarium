@@ -8,6 +8,7 @@ import { tickCrops } from '../systems/cropSystem.js';
 import { tickPlagues } from '../systems/plagueSystem.js';
 import { tickAlerts } from '../systems/alertSystem.js';
 import { findFirstPlayer, spend } from '../core/state.js';
+import { startLevel, tickSim, TimeState } from '../core/time.js';
 
 // === Rombos perfectos 2:1 ===
 const PROJ_W = 256;
@@ -139,6 +140,58 @@ function addIsoTile(scene, key, gx, gy, offX, offY) {
   return img;
 }
 
+// ---- constantes de color ----
+const SOIL_DRY    = { r:153, g:102, b: 51 }; // fill para seca
+const SOIL_WET    = { r: 92, g: 58,  b: 30 }; // fill para mojada (seca→oscura)
+
+// multiplicadores (0..1) para tint multiplicativo (mantiene textura)
+const PLOWED_MUL = { r: 0.85, g: 0.75, b: 0.55 };  // arada
+const WET_MUL    = { r: 0.70, g: 0.65, b: 0.60 };  // regada (oscurece)
+
+// utilidades
+const toRGB = (r,g,b)=> (r<<16)|(g<<8)|b;
+const mulToTint = (m)=> toRGB((m.r*255)|0,(m.g*255)|0,(m.b*255)|0);
+const mulFactors = (a,b)=> ({ r:a.r*b.r, g:a.g*b.g, b:a.b*b.b });
+
+const jitterColor = (r,g,b, jr=6,jg=6,jb=4) => {
+  const R = Phaser.Math.Clamp(r + Phaser.Math.Between(-jr, jr), 0, 255);
+  const G = Phaser.Math.Clamp(g + Phaser.Math.Between(-jg, jg), 0, 255);
+  const B = Phaser.Math.Clamp(b + Phaser.Math.Between(-jb, jb), 0, 255);
+  return (R<<16)|(G<<8)|B;
+};
+
+function applySoilVisual(scene, parcelaId) {
+  const p   = repoGet('parcelas', parcelaId);
+  const spr = scene.spriteByParcela.get(parcelaId);
+  if (!p || !spr) return;
+
+  const isWet = p.wetUntil && State.clock < p.wetUntil;
+
+  if (p.arada) {
+    // textura con surcos
+    spr.setTexture('Lava3');
+    spr.clearTint();   // limpia fills previos
+    spr.resetPipeline();
+
+    // multiplicativo base de arado
+    let mul = { ...PLOWED_MUL };
+    // si además está mojada, compón multiplicadores (más oscuro)
+    if (isWet) mul = mulFactors(mul, WET_MUL);
+
+    spr.setTint(mulToTint(mul)); // <-- multiplica (mantiene surcos)
+  } else {
+    // tierra sin arar: usamos FILL (recolorea por completo)
+    spr.setTexture('Lava1');
+    spr.clearTint();
+    spr.resetPipeline();
+    spr.setTintFill(
+      isWet
+        ? jitterColor(SOIL_WET.r, SOIL_WET.g, SOIL_WET.b, 4,4,3) // mojada = más oscuro
+        : jitterColor(SOIL_DRY.r, SOIL_DRY.g, SOIL_DRY.b, 6,6,4) // seca
+    );
+  }
+}
+
 
 export default class GameScene extends Phaser.Scene {
   constructor() {
@@ -155,7 +208,9 @@ export default class GameScene extends Phaser.Scene {
   }
 
   create() {
-        // Activa que solo el objeto “más arriba” reciba el click
+    startLevel(0);
+    console.log('[Game] create', window.__CV_START__); 
+    // Activa que solo el objeto “más arriba” reciba el click
     if (this.input?.setTopOnly) this.input.setTopOnly(true);
     Factory.createPlayer({ name: 'AgroPro', cartera: 200 });
     Factory.createTienda();
@@ -196,7 +251,7 @@ export default class GameScene extends Phaser.Scene {
     const grassKeys  = ['Acid1','Acid2'];
     const soilKey    = 'Lava1';   // tierra arable (sin arar)
     const plowedKey  = 'Lava3';   // arada (cuando presionas A)
-    const pathKey    = 'Lava2';   // <- CAMINO (usa la que tengas; si no, haz tint)
+    const pathKeys   = ['Ground2','Ground3','Ground4'];
 
     // Parámetros de caminos
     const BLOCK_W = 6;  // ancho de bloque arable entre caminos
@@ -209,6 +264,23 @@ export default class GameScene extends Phaser.Scene {
     const FARM_MAX_X = BORDER + FARM_COLS - 1;
     const FARM_MAX_Y = BORDER + FARM_ROWS - 1;
 
+    // === buffers de tipo de tile y sprites de suelo (para la pasada de decoración)
+    const tileType = [];         // "path" | "soil" | "grass"
+    const soilSprites = [];      // sprite por [gy][gx] si es suelo
+
+    function setType(gx, gy, type) {
+      if (!tileType[gy]) tileType[gy] = [];
+      tileType[gy][gx] = type;
+    }
+    function isPathAt(gx, gy) {
+      return tileType[gy]?.[gx] === 'path';
+    }
+    function saveSoilSprite(gx, gy, spr) {
+      if (!soilSprites[gy]) soilSprites[gy] = [];
+      soilSprites[gy][gx] = spr;
+    }
+
+
     for (let gy=0; gy<TOTAL_ROWS; gy++) {
       for (let gx=0; gx<TOTAL_COLS; gx++) {
         const isFarm = gx>=FARM_MIN_X && gx<=FARM_MAX_X && gy>=FARM_MIN_Y && gy<=FARM_MAX_Y;
@@ -217,33 +289,39 @@ export default class GameScene extends Phaser.Scene {
         let tile = null;
 
         if (!isFarm) {
-          // PASTO (anillos) — no interactivo
           key = pick(grassKeys);
           tile = addIsoTile(this, key, gx, gy, offX, offY);
+          setType(gx, gy, 'grass');     // ← marca
           continue;
         }
 
         // ===== Dentro del área jugable: decidir CAMINO vs SUELO =====
-        // coords relativas al área jugable
-        const cc = gx - BORDER;
+        const cc = gx - BORDER;   // coords relativas al área jugable
         const rr = gy - BORDER;
 
-        const inVPath = ((cc + 1) % (BLOCK_W + PATH_W)) > BLOCK_W;
-        const inHPath = ((rr + 1) % (BLOCK_H + PATH_W)) > BLOCK_H;
+        const modX = BLOCK_W + PATH_W;
+        const modY = BLOCK_H + PATH_W;
+        const rx = cc % modX;
+        const ry = rr % modY;
+
+        const inVPath = rx >= BLOCK_W;  // ← antes usabas >, por eso no salían
+        const inHPath = ry >= BLOCK_H;
         const isPath  = inVPath || inHPath;
 
         if (isPath) {
-          // CAMINO (no arable, no parcela)
-          key = pathKey;
-          tile = addIsoTile(this, key, gx, gy, offX, offY);
-          // Si no tienes textura de camino, deja soilKey pero con tinte:
-          // tile.setTexture(soilKey).setTint(0xcccccc);
+          const pathKey = pick(pathKeys);
+          tile = addIsoTile(this, pathKey, gx, gy, offX, offY);
+          tile.setTint(0x9aa3a1); // ↓ contraste (gris cálido)
+          setType(gx, gy, 'path');               // ← marca
           continue;
         }
-
         // SUELO ARABLE (sin cultivo por defecto)
         key = soilKey;
         tile = addIsoTile(this, key, gx, gy, offX, offY);
+        tile.setTintFill(jitterColor(SOIL_DRY.r, SOIL_DRY.g, SOIL_DRY.b, 6, 6, 4));
+
+        setType(gx, gy, 'soil');          // ← marca
+        saveSoilSprite(gx, gy, tile);  
 
         // Recurso agua (inicia seco para forzar riego)
         const recAgua = Factory.createRecurso({ tipo: 'AGUA', nivel: 0.0 });
@@ -261,6 +339,43 @@ export default class GameScene extends Phaser.Scene {
         tile.on('pointerdown', () => this.selectParcela(parcela.id));
       }
     }
+
+    // ====== DECORACIÓN: sombra fina en bordes suelo↔camino ======
+    const edge = this.add.graphics()
+      .setDepth(9999)
+      .setAlpha(0.10)
+      .fillStyle(0x000000);
+
+    for (let gy = FARM_MIN_Y; gy <= FARM_MAX_Y; gy++) {
+      for (let gx = FARM_MIN_X; gx <= FARM_MAX_X; gx++) {
+        if (tileType[gy]?.[gx] !== 'soil') continue;
+
+        const touchRight = isPathAt(gx + 1, gy);
+        const touchDown  = isPathAt(gx, gy + 1);
+        if (!touchRight && !touchDown) continue;
+
+        const { sx, sy } = isoProject(gx, gy, offX, offY);
+        const hw = PROJ_W / 2, hh = PROJ_H / 2;
+
+        // sombra hacia la derecha (camino a la derecha)
+        if (touchRight) {
+          edge.fillTriangle(
+            sx, sy,           // vértice superior
+            sx + hw, sy,      // derecha
+            sx, sy + hh       // inferior
+          );
+        }
+        // sombra hacia abajo (camino abajo)
+        if (touchDown) {
+          edge.fillTriangle(
+            sx, sy,           // vértice superior
+            sx, sy + hh,      // inferior
+            sx - hw, sy       // izquierda
+          );
+        }
+      }
+    }
+
 
     // ===== Límites de cámara tal cual los tenías =====
     const tl = isoProject(0, TOTAL_ROWS - 1, this.offX, this.offY);
@@ -334,114 +449,116 @@ export default class GameScene extends Phaser.Scene {
       cam.scrollY -= (p.y-last.y)/cam.zoom;
       last={x:p.x,y:p.y};
     });
+
+    if (!this.scene.isActive('UI')) {
+      this.scene.launch('UI');
+  }
   }
 
-selectParcela(id){
-  this.selectedParcelaId = id;
-  const p = repoGet('parcelas', id);
-  const c = p?.cultivoId ? repoGet('cultivos', p.cultivoId) : null;
-  const agua = p?.recursos.map(rid => repoGet('recursos', rid)).find(r => r?.tipo==='AGUA');
+  selectParcela(id){
+    this.selectedParcelaId = id;
+    const p = repoGet('parcelas', id);
+    const c = p?.cultivoId ? repoGet('cultivos', p.cultivoId) : null;
+    const agua = p?.recursos.map(rid => repoGet('recursos', rid)).find(r => r?.tipo==='AGUA');
 
-  this.game.events.emit('inspect:parcela', {
-    id: p?.id, saludSuelo: p?.saludSuelo?.toFixed(2),
-    cultivo: c ? { tipo: c.tipo, etapa: c.etapa, progreso: c.progreso.toFixed(2) } : null,
-    agua: agua ? { nivel: Number(agua.nivel).toFixed(2) } : null
-  });
+    this.game.events.emit('inspect:parcela', {
+      id: p?.id, saludSuelo: p?.saludSuelo?.toFixed(2),
+      cultivo: c ? { tipo: c.tipo, etapa: c.etapa, progreso: c.progreso.toFixed(2) } : null,
+      agua: agua ? { nivel: Number(agua.nivel).toFixed(2) } : null
+    });
 
-  const sprite = this.spriteByParcela.get(id);          // 👈
-  this.drawSelector(p.x, p.y, sprite);                  // 👈 pasa el sprite
-}
+    const sprite = this.spriteByParcela.get(id);          // 👈
+    this.drawSelector(p.x, p.y, sprite);                  // 👈 pasa el sprite
+  }
 
-drawSelector(_gx, _gy, sprite){
-  const SEL_Y_SCALE = 0.5;
-  const g = this.selector || (this.selector = this.add.graphics());
-  g.clear().lineStyle(2, 0x60a5fa, 1);
+  drawSelector(_gx, _gy, sprite){
+    const SEL_Y_SCALE = 0.5;
+    const g = this.selector || (this.selector = this.add.graphics());
+    g.clear().lineStyle(2, 0x60a5fa, 1);
 
-  if (sprite) {
-    const poly = sprite.getData('topPoly');
-    if (poly) {
-      const sx = sprite.x, sy = sprite.y;
-      const sxScale = sprite.scaleX ?? 1;
-      const syScale = sprite.scaleY ?? 1;
+    if (sprite) {
+      const poly = sprite.getData('topPoly');
+      if (poly) {
+        const sx = sprite.x, sy = sprite.y;
+        const sxScale = sprite.scaleX ?? 1;
+        const syScale = sprite.scaleY ?? 1;
 
-      // y local más alto (punta superior del rombo)
-      let topLocalY = Infinity;
-      for (const p of poly.points) if (p.y < topLocalY) topLocalY = p.y;
+        // y local más alto (punta superior del rombo)
+        let topLocalY = Infinity;
+        for (const p of poly.points) if (p.y < topLocalY) topLocalY = p.y;
 
-      // escalamos hacia la punta: y' = top + (y - top) * scale
-      const pts = poly.points.map(p => ({
-        x: sx + p.x * sxScale,
-        y: sy + (topLocalY + (p.y - topLocalY) * SEL_Y_SCALE) * syScale
-      }));
+        // escalamos hacia la punta: y' = top + (y - top) * scale
+        const pts = poly.points.map(p => ({
+          x: sx + p.x * sxScale,
+          y: sy + (topLocalY + (p.y - topLocalY) * SEL_Y_SCALE) * syScale
+        }));
 
-      g.setDepth(sy + 9999).strokePoints(pts, true);
+        g.setDepth(sy + 9999).strokePoints(pts, true);
+        return;
+      }
+    }
+    // fallback (solo si no hay sprite)
+    const { sx, sy } = isoProject(_gx, _gy, this.offX, this.offY);
+    const halfW = PROJ_W/2, halfH = PROJ_H/2;
+    g.setDepth(sy + 9999).strokePoints(
+      [{x:sx, y:sy-halfH}, {x:sx+halfW, y:sy}, {x:sx, y:sy+halfH}, {x:sx-halfW, y:sy}],
+      true
+    );
+  }
+
+
+  plowSelected() {
+    if (!this.selectedParcelaId) return;
+    const p = repoGet('parcelas', this.selectedParcelaId);
+    const spr = this.spriteByParcela.get(p?.id);
+    if (!p || !spr) return;
+
+    if (p.arada) { this.game.events.emit('toast',{type:'info', msg:`${p.id} ya está arada.`}); return; }
+
+    // (si recalculas polígono por la nueva textura, hazlo aquí)
+    p.arada = true;
+    applySoilVisual(this, p.id);          // 👈 textura Lava3 + multiplicador
+    this.game.events.emit('toast', { type:'ok', msg:`Araste ${p.id}.` });
+    this.drawSelector(p.x, p.y, spr);
+  }
+
+
+  waterSelected() {
+    const selId = this.selectedParcelaId;
+    if (!selId) return;
+
+    const p = repoGet('parcelas', selId);
+    if (!p) return;
+
+    const player = findFirstPlayer();
+    if (!spend(player, 10)) {
+      this.game.events.emit('toast', { type:'warn', msg:'Fondos insuficientes (10).' });
       return;
     }
+
+    const agua = (p.recursos||[])
+      .map(rid => repoGet('recursos', rid))
+      .find(r => r && r.tipo === 'AGUA');
+
+    if (!agua) { this.game.events.emit('toast',{type:'warn',msg:`La parcela ${p.id} no tiene AGUA.`}); return; }
+
+    // lógica de agua
+    agua.nivel = Math.min(1, (agua.nivel ?? 0) + 0.25);
+
+    // marca mojado un rato (ajusta duración)
+    const WET_DURATION = 1200;
+    p.wetUntil = (p.wetUntil && State.clock < p.wetUntil)
+      ? p.wetUntil + Math.floor(WET_DURATION*0.5)
+      : State.clock + WET_DURATION;
+
+    applySoilVisual(this, p.id);  // 👈 actualiza (seca→fill oscuro, arada→tint compuesto)
+    this.game.events.emit('toast', { type:'ok', msg:`Riego aplicado a ${p.id}.` });
+
+    // limpia alertas y refresca panel
+    repoAll('alertas').forEach(a => { if (a.parcelaId === p.id) a.visible = false; });
+    this.selectParcela(p.id);
   }
-  // fallback (solo si no hay sprite)
-  const { sx, sy } = isoProject(_gx, _gy, this.offX, this.offY);
-  const halfW = PROJ_W/2, halfH = PROJ_H/2;
-  g.setDepth(sy + 9999).strokePoints(
-    [{x:sx, y:sy-halfH}, {x:sx+halfW, y:sy}, {x:sx, y:sy+halfH}, {x:sx-halfW, y:sy}],
-    true
-  );
-}
 
-
-plowSelected() {
-  if (!this.selectedParcelaId) return;
-  const p = repoGet('parcelas', this.selectedParcelaId);
-  const sprite = this.spriteByParcela.get(p.id);
-  if (!sprite) return;
-
-  if (p.arada) { this.game.events.emit('toast',{type:'info', msg:`${p.id} ya está arada.`}); return; }
-
-  sprite.setTexture('Lava3');
-  sprite.setData('texKey', 'Lava3');
-
-  const { polyLocal } = measureDiamondFromTop(this, 'Lava3', 180);
-  const INSET_X = 8, INSET_Y = 4;
-
-  const polyLocalInset = new Phaser.Geom.Polygon(
-    polyLocal.points.map(p => new Phaser.Geom.Point(
-      Math.sign(p.x) * Math.max(0, Math.abs(p.x) - INSET_X),
-      Math.sign(p.y) * Math.max(0, Math.abs(p.y) - INSET_Y)
-    ))
-  );
-
-  // 👉 nuevo hit-area en coords de textura
-  const polyHit = new Phaser.Geom.Polygon(
-    polyLocalInset.points.map(p => new Phaser.Geom.Point(
-      p.x + sprite.displayOriginX,
-      p.y + sprite.displayOriginY
-    ))
-  );
-
-  sprite.setData('topPoly', polyLocalInset);
-  sprite.setInteractive(polyHit, Phaser.Geom.Polygon.Contains);
-
-  p.arada = true;
-  this.game.events.emit('toast', { type:'ok', msg:`Araste ${p.id}.` });
-
-  this.drawSelector(p.x, p.y, sprite); // siempre con sprite
-}
-
-
-  waterSelected(){
-    if(!this.selectedParcelaId) return;
-    const p = repoGet('parcelas', this.selectedParcelaId);
-    const player = findFirstPlayer();
-    if(!spend(player, 10)){
-      this.game.events.emit('toast', { type:'warn', msg:'Fondos insuficientes (10).' }); return;
-    }
-    const agua = p.recursos.map(rid => repoGet('recursos', rid)).find(r => r?.tipo==='AGUA');
-    if(agua){
-      agua.nivel = Math.min(1, (agua.nivel ?? 0) + 0.25);
-      this.game.events.emit('toast', { type:'ok', msg:`Riego aplicado a ${p.id}.` });
-      repoAll('alertas').forEach(a => { if(a.parcelaId===p.id) a.visible=false; });
-      this.selectParcela(p.id);
-    }
-  }
 
   harvestSelected(){
     if(!this.selectedParcelaId) return;
@@ -473,7 +590,19 @@ plowSelected() {
     if (Phaser.Input.Keyboard.JustDown(this.keyC)) this.harvestSelected();
 
     State.clock += 1;
+    tickSim(delta);
     tickClimate(); tickCrops(); tickPlagues(); tickAlerts();
+
+    // en update(), por ejemplo cada 15 ticks
+    if ((State.clock % 15) === 0) {
+      for (const p of repoAll('parcelas')) {
+        if (p.wetUntil && State.clock >= p.wetUntil) {
+          p.wetUntil = 0;
+          applySoilVisual(this, p.id); // vuelve a seca (fill) o arada (tint base)
+        }
+      }
+    }
+
   }
 
 }
