@@ -225,9 +225,7 @@ export default class GameScene extends Phaser.Scene {
 
   create() {
     const cam = this.cameras.main;
-    this.ambient = this.add.rectangle(0, 0, 10, 10, 0x000000, 0)
-      .setOrigin(0)
-      .setDepth(1e9);
+    cam.setBackgroundColor(0x859e70);
 
     startLevel(0);
     if (this.input?.setTopOnly) this.input.setTopOnly(true);
@@ -372,19 +370,55 @@ export default class GameScene extends Phaser.Scene {
       addEntry(e);
     }
 
-    // ÁRBOLES
-    {
-      const tryPlaceTreeRow = (gyRow) => {
-        for (let gx = 1; gx < TOTAL_W - 1; gx += 4) {
-          if (world[gyRow][gx] === T.GRASS) {
-            const e = place(this, isoProject, occ, world, gx, gyRow, 'tree', { projW: PROJ_W });
-            addEntry(e);
-          }
-        }
-      };
-      tryPlaceTreeRow(FARM_MIN_Y - 2 >= 0 ? FARM_MIN_Y - 2 : 0);
-      tryPlaceTreeRow(Math.min(TOTAL_H - 1, FARM_MAX_Y + 2));
-    }
+    // ====== ÁRBOLES + BOSQUE ======
+    const TREE_KEYS = ['tree', 'tree2']; // usa defs de decor.js
+    const BUSH_KEYS = ['bush1', 'bush2'];
+
+    const rand = Phaser.Utils.Array.GetRandom;
+
+    // perímetro más denso (cada 2 celdas con jitter)
+    const plantBorder = (step=2, jitter=0.8) => {
+      const j = v => v + Phaser.Math.FloatBetween(-jitter, jitter);
+
+      // top/bottom
+      for (let x = 1; x < TOTAL_W - 1; x += step) {
+        const gx1 = Math.round(j(x));
+        const gyT = Math.max(0, FARM_MIN_Y - 2);
+        const gyB = Math.min(TOTAL_H - 1, FARM_MAX_Y + 2);
+        if (world[gyT][gx1] === T.GRASS) addEntry(place(this, isoProject, occ, world, gx1, gyT, rand(TREE_KEYS), { projW: PROJ_W }));
+        if (world[gyB][gx1] === T.GRASS) addEntry(place(this, isoProject, occ, world, gx1, gyB, rand(TREE_KEYS), { projW: PROJ_W }));
+      }
+      // left/right
+      for (let y = 1; y < TOTAL_H - 1; y += step) {
+        const gy1 = Math.round(j(y));
+        const gxL = Math.max(0, FARM_MIN_X - 2);
+        const gxR = Math.min(TOTAL_W - 1, FARM_MAX_X + 2);
+        if (world[gy1][gxL] === T.GRASS) addEntry(place(this, isoProject, occ, world, gxL, gy1, rand(TREE_KEYS), { projW: PROJ_W }));
+        if (world[gy1][gxR] === T.GRASS) addEntry(place(this, isoProject, occ, world, gxR, gy1, rand(TREE_KEYS), { projW: PROJ_W }));
+      }
+    };
+
+    // parches tipo “bosque”
+    const plantPatch = ({ cx, cy, radius=6, density=0.85, bushRatio=0.25 }) => {
+      const area = Math.PI * radius * radius;
+      const count = Math.floor(area * density * 0.45);
+      for (let i = 0; i < count; i++) {
+        const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
+        const r   = Phaser.Math.FloatBetween(0, radius);
+        const gx  = Phaser.Math.Clamp(Math.round(cx + Math.cos(ang)*r + Phaser.Math.FloatBetween(-0.3,0.3)), 0, TOTAL_W-1);
+        const gy  = Phaser.Math.Clamp(Math.round(cy + Math.sin(ang)*r + Phaser.Math.FloatBetween(-0.3,0.3)), 0, TOTAL_H-1);
+        if (world[gy][gx] !== T.GRASS) continue;
+        const key = (Math.random() < bushRatio) ? rand(BUSH_KEYS) : rand(TREE_KEYS);
+        addEntry(place(this, isoProject, occ, world, gx, gy, key, { projW: PROJ_W }));
+      }
+    };
+
+    // ejecuta
+    plantBorder(2, 0.8);
+    // 2–3 parches grandes en bordes largos (no invaden parcelas)
+    plantPatch({ cx: Math.floor(TOTAL_W*0.22), cy: Math.floor(TOTAL_H*0.25), radius: 5, density: 0.9 });
+    plantPatch({ cx: Math.floor(TOTAL_W*0.80), cy: Math.floor(TOTAL_H*0.70), radius: 6, density: 0.85 });
+
 
     // ROCAS
     {
@@ -404,14 +438,15 @@ export default class GameScene extends Phaser.Scene {
 
     // ARBUSTOS (clusters)
     {
-      const cluster = (cx, cy, radius = 2, count = 4) => {
+      const BUSH_KEYS = ['bush1', 'bush2'];
+      const cluster = (cx, cy, radius = 2, count = 6) => { // subí count para más densidad
         for (let i = 0; i < count; i++) {
           const dx = Phaser.Math.Between(-radius, radius);
           const dy = Phaser.Math.Between(-radius, radius);
           const gx = Phaser.Math.Clamp(cx + dx, 0, TOTAL_W - 1);
           const gy = Phaser.Math.Clamp(cy + dy, 0, TOTAL_H - 1);
           if (world[gy][gx] !== T.GRASS) continue;
-          const e = place(this, isoProject, occ, world, gx, gy, 'bush1');
+          const e = place(this, isoProject, occ, world, gx, gy, Phaser.Utils.Array.GetRandom(BUSH_KEYS));
           addEntry(e);
         }
       };
@@ -421,16 +456,35 @@ export default class GameScene extends Phaser.Scene {
       cluster(TOTAL_W - Math.floor(grassBorder / 2) - 1, TOTAL_H - Math.floor(grassBorder / 2) - 1);
     }
 
+    // Fondo verde del canvas (por si el rectángulo se sale del viewport)
+    this.cameras.main.setBackgroundColor(0x859e70);
 
+    // Calcula el rectángulo ISO que envuelve todo el mapa para centrar el "ground"
+    const tlIso = isoProject(0, TOTAL_H - 1, this.offX, this.offY);
+    const brIso = isoProject(TOTAL_W - 1, 0, this.offX, this.offY);
+    const centerX = (tlIso.sx + brIso.sx) / 2;
+    const centerY = (tlIso.sy + brIso.sy) / 2;
+    const mapWpx  = Math.abs(brIso.sx - tlIso.sx);
+    const mapHpx  = Math.abs(brIso.sy - tlIso.sy);
 
+    // “suelo” enorme bajo todo (4× el mapa para cubrir siempre)
+    if (this.ground) this.ground.destroy();
+    this.ground = this.add.rectangle(centerX, centerY, mapWpx*4, mapHpx*4, 0x859e70)
+      .setDepth(-1_000_000);
 
+    // Overlay ambiental (se redimensiona en update)
+    if (!this.ambient) {
+      this.ambient = this.add.rectangle(0, 0, 10, 10, 0x000000, 0)
+        .setOrigin(0)
+        .setDepth(1e9);
+    }
     // ===== Límites de cámara =====
     const tl = isoProject(0, TOTAL_H - 1, this.offX, this.offY);
     const br = isoProject(TOTAL_W - 1, 0, this.offX, this.offY);
     const minX = Math.min(tl.sx, br.sx), maxX = Math.max(tl.sx, br.sx);
     const minY = Math.min(tl.sy, br.sy), maxY = Math.max(tl.sy, br.sy);
 
-    const vw = this.scale.width, vh = this.scale.height, padFit = 80;
+    const vw = this.scale.width, vh = this.scale.height, padFit = 50;
     const mapW = maxX - minX, mapH = maxY - minY;
     const zoomX = (vw - padFit * 2) / mapW;
     const zoomY = (vh - padFit * 2) / mapH;
@@ -440,7 +494,9 @@ export default class GameScene extends Phaser.Scene {
     const padWorld  = Math.max(padWorldX, padWorldY);
 
     this.cameras.main.setBounds(minX - padWorld, minY - padWorld, mapW + padWorld * 2, mapH + padWorld * 2);
-    this.cameras.main.setZoom(zoom);
+    // Usa un zoom inicial más cercano (≈35% más cerca, con tope 1.6)
+    const initialZoom = Math.min(zoom * 1.35, 1.6);
+    this.cameras.main.setZoom(initialZoom);
     this.cameras.main.centerOn((minX + maxX) / 2, (minY + maxY) / 2);
 
     // ===== Clima demo =====
@@ -457,17 +513,13 @@ export default class GameScene extends Phaser.Scene {
     this.keyR = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.keyC = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
 
-    // HUD breve
-    this.add.text(16, 8,
-      'ISO 256×128 — Arar (A) / Riega (R) / Cosecha (C) — Click bloque para seleccionar',
-      { fontFamily:'ui-sans-serif, system-ui, sans-serif', fontSize:'14px', color:'#e2e8f0' }
-    ).setScrollFactor(0);
 
     // Pan/Zoom
     this.input.mouse.disableContextMenu();
     this.input.on('wheel', (_p, _o, _dx, dy) => {
       const cam = this.cameras.main;
-      cam.setZoom(Phaser.Math.Clamp(cam.zoom * (dy > 0 ? 0.9 : 1.1), 0.3, 2.5));
+      const next = cam.zoom * (dy > 0 ? 0.9 : 1.1);
+      cam.setZoom(Phaser.Math.Clamp(next, 0.2, 2.2));
     });
     let dragging = false, last = { x: 0, y: 0 };
     this.input.on('pointerdown', p => { if (p.rightButtonDown()) { dragging = true; last = { x: p.x, y: p.y }; } });
