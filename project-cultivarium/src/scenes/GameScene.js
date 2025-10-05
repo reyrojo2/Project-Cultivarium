@@ -420,8 +420,6 @@ export default class GameScene extends Phaser.Scene {
 
     // Inputs
     this.cursors = this.input.keyboard.createCursorKeys();
-    this.keyR = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
-    this.keyC = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
 
     // HUD
     this.add.text(16, 8,
@@ -451,18 +449,24 @@ export default class GameScene extends Phaser.Scene {
     });
 
     // --- Puente UI -> GameScene: acciones por evento ---
-this.game.events.on('action:perform', ({ actionType }) => {
+// dentro de create()
+this._onUIAction = ({ actionType }) => {
   switch (actionType) {
-    case 'ARAR':          return this.plowSelected();
-    case 'REGAR':         return this.waterSelected();
-    case 'SEMBRAR':       return this.plantSelected();
-    case 'COSECHAR':      return this.harvestSelected();
-    case 'UPGRADE_TECH':  return this.openTechTree();
-    case 'SCAN_REGION':   return this.scanRegion();
-    case 'SELL_HARVEST':  return this.sellHarvest();
-    default: break;
+    case 'ARAR': return this.plowSelected();
+    case 'REGAR': return this.waterSelected();
+    case 'SEMBRAR': return this.plantSelected();
+    case 'COSECHAR': return this.harvestSelected();
+    case 'UPGRADE_TECH': return this.openTechTree();
+    case 'SCAN_REGION': return this.scanRegion();
+    case 'SELL_HARVEST': return this.sellHarvest();
   }
+};
+this.game.events.on('action:perform', this._onUIAction);
+
+this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+  this.game.events.off('action:perform', this._onUIAction);
 });
+
 
 // Limpieza del listener al cerrar la escena
 this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -524,8 +528,9 @@ this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       [{x:sx, y:sy-halfH}, {x:sx+halfW, y:sy}, {x:sx, y:sy+halfH}, {x:sx-halfW, y:sy}],
       true
     );
+    g.lineStyle(2, 0x60a5fa, 1).strokePoints(pts, true);
+    g.fillStyle(0x60a5fa, 0.06).fillPoints(pts, true); // sutil
   }
-
 
   plowSelected() {
     if (!this.selectedParcelaId) return;
@@ -544,7 +549,9 @@ this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
 
 
   waterSelected() {
-    const selId = this.selectedParcelaId;
+    if (this._cooldowns.water > 0) return;
+    this._cooldowns.water = 400; // ms    const selId = this.selectedParcelaId;
+    
     if (!selId) return;
 
     const p = repoGet('parcelas', selId);
