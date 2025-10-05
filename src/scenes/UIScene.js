@@ -79,15 +79,23 @@ export default class UIScene extends Phaser.Scene {
     });
 
     // ===== Listeners de juego (Toasts y Inspección) =====
-    this.game.events.on('inspect:parcela', (data) => {
-      const lines = [
-        `Parcela: #${data.id}`,
-        `Suelo: ${data.saludSuelo ? (data.saludSuelo * 100).toFixed(0) + '%' : '??'}`,
-        data.cultivo ? `Cultivo: ${data.cultivo.tipo} (${data.cultivo.etapa} ${(data.cultivo.progreso * 100).toFixed(0)}%)` : 'Cultivo: -',
-        data.agua ? `Agua: ${(data.agua.nivel * 100).toFixed(0)}%` : 'Agua: -'
-      ];
-      this.inspectText.setText(lines.join('\n'));
-    });
+  this.game.events.on('inspect:parcela', (data) => {
+  const riesgoPlaga = data.riesgoPlaga || 0;
+  const intensidadPlaga = data.intensidadPlaga || 0;
+  const plagaActiva = data.plagaActiva || false;
+  
+  const lines = [
+    `Parcela: #${data.id}`,
+    `Suelo: ${data.saludSuelo ? (data.saludSuelo * 100).toFixed(0) + '%' : '??'}`,
+    data.cultivo ? `Cultivo: ${data.cultivo.tipo} (${data.cultivo.etapa} ${(data.cultivo.progreso * 100).toFixed(0)}%)` : 'Cultivo: -',
+    data.agua ? `Agua: ${(data.agua.nivel * 100).toFixed(0)}%` : 'Agua: -',
+    '', // línea en blanco
+    `Plaga: ${plagaActiva ? 'ACTIVA' : 'No'}`,
+    `Riesgo: ${(riesgoPlaga * 100).toFixed(1)}%`,
+    `Intensidad: ${intensidadPlaga > 0 ? intensidadPlaga + '/3' : '-'}`
+  ];
+  this.inspectText.setText(lines.join('\n'));
+});
 
     this.game.events.on('toast', (t) => {
       this.showActionFeedback(t.msg, t.type === 'ok' ? colors.feedback.success : colors.feedback.error);
@@ -172,7 +180,7 @@ export default class UIScene extends Phaser.Scene {
 
     container.add([this.playerNameText, this.locationText, this.dayText, this.inspectTitle, this.inspectText]);
 
-    const sep2 = this.add.graphics().fillStyle(colors.panelBorder, 0.5).fillRect(16, y += 110, W - 32, 2);
+    const sep2 = this.add.graphics().fillStyle(colors.panelBorder, 0.5).fillRect(16, y += 140, W - 32, 2);
     container.add(sep2);
     y += 12;
 
