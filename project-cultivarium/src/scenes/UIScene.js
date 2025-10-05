@@ -1,139 +1,207 @@
-/**
- * UIScene
- * - HUD: FPS, reloj, cartera, panel de inspección y alertas.
- * - Botones: Regar (R), Cosechar (C).
- */
-import { State, repoAll } from '../core/state.js';
-import { findFirstPlayer } from '../core/state.js';
+import Phaser from 'phaser';
+import { State, repoAll, findFirstPlayer, repoGet } from '../core/state.js';
 import { TimeState, getSimDate, getSimDayNumber } from '../core/time.js';
-import { LEVELS } from '../core/time.js';
 
 export default class UIScene extends Phaser.Scene {
-  constructor() {
-    super('UI');
-    this.fpsText = null;
-    this.clockText = null;
-    this.moneyText = null;
-    this.panel = null;
-    this.alertsText = null;
-  }
+    constructor() {
+        super('UI');
+    }
 
-  create() {
-    // Card HUD superior (FPS / Fecha / Dinero)
-    const hudX = 8, hudY = 6;
-    const hudW = 350;  // ajusta si necesitas más ancho
-    const hudH = 54;   // alto para 3 líneas
-    const hudBg = this.add.graphics().setScrollFactor(0);
-    hudBg.fillStyle(0x000000, 0.30);         // translúcido
-    hudBg.lineStyle(2, 0xffffff, 0.06);      // borde muy sutil
-    hudBg.fillRoundedRect(hudX, hudY, hudW, hudH, 10);
-    hudBg.strokeRoundedRect(hudX, hudY, hudW, hudH, 10);
+    create() {
+        const screenWidth = this.scale.width;
+        const screenHeight = this.scale.height;
 
-    // Luego crea los textos encima:
-    this.fpsText   = this.add.text(hudX + 8, hudY + 4,  'FPS: --', { fontSize: '12px', color: '#e2e8f0' }).setScrollFactor(0);
-    this.clockText = this.add.text(hudX + 8, hudY + 20, 'Clock: 0', { fontSize: '12px', color: '#94a3b8' }).setScrollFactor(0);
-    this.moneyText = this.add.text(hudX + 8, hudY + 36, '₲ 0',     { fontSize: '12px', color: '#60a5fa' }).setScrollFactor(0);
+        // Paleta de colores oficial "Cultivarium"
+        const colors = {
+            panelBg: 0x9A6B41,
+            panelBorder: 0x5B3A29,
+            textPrimary: '#F4F0E1',
+            textSecondary: '#E6D6A6',
+            actionButton: 0x8DA86C,
+            actionButtonHover: 0x79a83c,
+            bar: {
+                hp: 0x4ade80,       // Verde
+                heat: 0xf87171,     // Rojo
+                water: 0x60a5fa,    // Azul
+                humidity: 0xfbbf24, // Amarillo
+                money: 0xf59e0b,     // Naranja
+                energy: 0xc084fc      // Púrpura
+            }
+        };
 
-    // ====== Panel de inspección con fondo redondeado ======
-    const panelWidth = 300;
-    const panelHeight = 140;
-    const panelX = this.scale.width - panelWidth - 10;
-    const panelY = 10;
+        // --- PANEL IZQUIERDO (ESTADO) PLEGABLE ---
+        this.statusPanel = this.createCollapsiblePanel(0, 0, 320, screenHeight, 'left', colors);
+        this.populateStatusPanel(this.statusPanel, colors);
 
-    const panelBg = this.add.graphics().setScrollFactor(0);
-    panelBg.fillStyle(0x000000, 0.35);
-    panelBg.lineStyle(2, 0xffffff, 0.08);
-    panelBg.fillRoundedRect(panelX, panelY, panelWidth, panelHeight, 12);
-    panelBg.strokeRoundedRect(panelX, panelY, panelWidth, panelHeight, 12);
+        // --- PANEL DERECHO (ACCIONES) PLEGABLE ---
+        this.actionPanel = this.createCollapsiblePanel(screenWidth, 0, 280, screenHeight, 'right', colors);
+        this.populateActionPanel(this.actionPanel, colors);
+    }
 
-    this.panel = this.add.text(panelX + 10, panelY + 10, 'Selecciona una parcela…', {
-      fontSize: '12px',
-      color: '#e2e8f0',
-      wordWrap: { width: panelWidth - 20 },
-    }).setScrollFactor(0);
+    createCollapsiblePanel(x, y, width, height, side, colors) {
+        // Un contenedor agrupa todos los elementos del panel
+        const container = this.add.container(x, y);
+        if (side === 'right') container.x -= width; // Ajuste inicial para el panel derecho
 
-    // ====== Panel de alertas con fondo redondeado ======
-    const alertsWidth = 300;
-    const alertsHeight = 160;
-    const alertsX = this.scale.width - alertsWidth - 10;
-    const alertsY = panelY + panelHeight + 10;
+        // Fondo del panel
+        const panelBg = this.add.graphics();
+        panelBg.fillStyle(colors.panelBg, 0.9);
+        const cornerRadius = (side === 'left') ? { tr: 24, br: 24 } : { tl: 24, bl: 24 };
+        panelBg.fillRoundedRect(0, 0, width, height, cornerRadius);
+        panelBg.lineStyle(4, colors.panelBorder);
+        panelBg.strokeRoundedRect(0, 0, width, height, cornerRadius);
+        
+        container.add(panelBg);
+        
+        // Botón para plegar/desplegar
+        const toggleButton = this.add.text(
+            side === 'left' ? width - 25 : 25, 
+            height / 2, 
+            side === 'left' ? '◀' : '▶', 
+            { fontSize: '32px', color: colors.textPrimary, fontStyle: 'bold' }
+        ).setOrigin(0.5).setInteractive({ useHandCursor: true });
 
-    const alertsBg = this.add.graphics().setScrollFactor(0);
-    alertsBg.fillStyle(0x0b1220, 0.55);
-    alertsBg.lineStyle(2, 0xffffff, 0.05);
-    alertsBg.fillRoundedRect(alertsX, alertsY, alertsWidth, alertsHeight, 12);
-    alertsBg.strokeRoundedRect(alertsX, alertsY, alertsWidth, alertsHeight, 12);
+        container.add(toggleButton);
 
-    this.alertsText = this.add.text(alertsX + 10, alertsY + 10, 'Alertas:', {
-      fontSize: '12px', color: '#fbbf24'
-    }).setScrollFactor(0);
+        let isCollapsed = false;
+        toggleButton.on('pointerdown', () => {
+            isCollapsed = !isCollapsed;
+            // Animación de desplazamiento
+            this.tweens.add({
+                targets: container,
+                x: isCollapsed ? (side === 'left' ? -width + 50 : this.scale.width - 50) : (side === 'left' ? 0 : this.scale.width - width),
+                duration: 300,
+                ease: 'Cubic.easeInOut'
+            });
+            toggleButton.setText(isCollapsed ? (side === 'left' ? '▶' : '◀') : (side === 'left' ? '◀' : '▶'));
+        });
 
-    // ====== Botonera (usa coordenadas del panel, no "bg") ======
-    const baseX = panelX + 10;
-    const baseY = panelY + panelHeight - 30; // cerca del borde inferior
-    const gap   = 10;
+        return { container, width, height, side };
+    }
 
-    const btnA = this.add.text(0, 0, '🚜 Arar (A)', { fontSize: '12px', color: '#c57122', backgroundColor: '#2a1e0b' })
-      .setPadding(6,4,6,4).setInteractive({ useHandCursor: true }).setScrollFactor(0);
+    populateStatusPanel(panel, colors) {
+        const container = panel.container;
+        const panelWidth = panel.width;
+        let currentY = 24;
 
-    const btnR = this.add.text(0, 0, '💧 Regar (R)', { fontSize: '12px', color: '#22c55e', backgroundColor: '#0b2a1a' })
-      .setPadding(6,4,6,4).setInteractive({ useHandCursor: true }).setScrollFactor(0);
+        // Info del jugador
+        this.playerNameText = this.add.text(panelWidth / 2, currentY, 'Agente', { fontSize: '28px', color: colors.textPrimary, fontStyle: 'bold' }).setOrigin(0.5, 0);
+        this.locationText = this.add.text(panelWidth / 2, currentY += 35, 'Perú', { fontSize: '20px', color: colors.textSecondary }).setOrigin(0.5, 0);
+        this.dayText = this.add.text(panelWidth / 2, currentY += 35, 'Día: 1', { fontSize: '20px', color: colors.textPrimary, fontStyle: '600', backgroundColor: 'rgba(0,0,0,0.2)', padding: { x: 16, y: 8 }, align: 'center', cornerRadius: 8 }).setOrigin(0.5, 0);
+        currentY += 60;
 
-    const btnC = this.add.text(0, 0, '🌾 Cosechar (C)', { fontSize: '12px', color: '#eab308', backgroundColor: '#2a230b' })
-      .setPadding(6,4,6,4).setInteractive({ useHandCursor: true }).setScrollFactor(0);
+        // Barras de estado
+        this.bars = {
+            hp: this.createHudBar('SALUD (NDVI)', currentY, colors.bar.hp, panelWidth, colors),
+            heat: this.createHudBar('CALOR (Estrés)', currentY += 70, colors.bar.heat, panelWidth, colors),
+            water: this.createHudBar('AGUA (SMAP)', currentY += 70, colors.bar.water, panelWidth, colors),
+            humidity: this.createHudBar('HUMEDAD (Atm.)', currentY += 70, colors.bar.humidity, panelWidth, colors),
+            money: this.createHudBar('DINERO ($)', currentY += 70, colors.bar.money, panelWidth, colors),
+            energy: this.createHudBar('ENERGÍA (⚡)', currentY += 70, colors.bar.energy, panelWidth, colors),
+        };
+        
+        Object.values(this.bars).forEach(bar => container.add(bar.elements));
+        container.add([this.playerNameText, this.locationText, this.dayText]);
+    }
+    
+    populateActionPanel(panel, colors) {
+        const container = panel.container;
+        const panelWidth = panel.width;
+        let currentY = 24;
+        const title = this.add.text(panelWidth / 2, currentY, 'Acciones', { fontSize: '28px', color: colors.textPrimary, fontStyle: 'bold' }).setOrigin(0.5, 0);
+        currentY += 70;
 
-    // fila horizontal
-    btnA.setPosition(baseX, baseY - 25);
-    btnR.setPosition(baseX, baseY);
-    btnC.setPosition(btnR.x + btnR.getBounds().width + gap, baseY);
+        const actionButtons = [
+            this.createActionButton('💧 Regar', currentY, () => this.game.events.emit('action:perform', { actionType: 'REGAR' }), panelWidth, colors),
+            this.createActionButton('🌱 Sembrar', currentY += 70, () => this.game.events.emit('action:perform', { actionType: 'SEMBRAR' }), panelWidth, colors),
+            this.createActionButton('🌾 Cosechar', currentY += 70, () => this.game.events.emit('action:perform', { actionType: 'COSECHAR' }), panelWidth, colors),
+        ];
 
-    // callbacks
-    btnA.on('pointerdown', () => this.game.scene.get('Game').plowSelected());
-    btnR.on('pointerdown', () => this.game.scene.get('Game').waterSelected());
+        container.add([title, ...actionButtons.flat()]);
+    }
 
+    createHudBar(label, y, color, panelWidth, colors) {
+        const panelPadding = 24;
+        const barWidth = panelWidth - (panelPadding * 2);
+        
+        const labelText = this.add.text(panelPadding, y, label, { fontSize: '16px', color: colors.textPrimary, fontStyle: 'bold' });
+        const valueText = this.add.text(panelWidth - panelPadding, y, '0%', { fontSize: '16px', color: colors.textSecondary, fontStyle: 'bold' }).setOrigin(1, 0);
+        
+        const bgBar = this.add.graphics();
+        bgBar.fillStyle(0x000000, 0.3);
+        bgBar.fillRoundedRect(panelPadding, y + 25, barWidth, 30, 15);
+        bgBar.lineStyle(2, colors.panelBorder);
+        bgBar.strokeRoundedRect(panelPadding, y + 25, barWidth, 30, 15);
 
-    // Listener para inspección (desde GameScene)
-    this.game.events.on('inspect:parcela', (data) => {
-      const lines = [
-        `Parcela: ${data.id}`,
-        `Suelo: ${data.saludSuelo}`,
-        data.cultivo ? `Cultivo: ${data.cultivo.tipo} (${data.cultivo.etapa} ${data.cultivo.progreso})` : 'Cultivo: -',
-        data.agua ? `Agua: ${data.agua.nivel}` : 'Agua: -'
-      ];
-      this.panel.setText(lines.join('\n'));
-    });
+        const valueBar = this.add.graphics();
+        
+        return { 
+            elements: [labelText, valueText, bgBar, valueBar], 
+            update: (value) => { // value es un número entre 0 y 1
+                value = Phaser.Math.Clamp(value, 0, 1);
+                valueText.setText(`${(value * 100).toFixed(0)}%`);
+                valueBar.clear();
+                valueBar.fillStyle(color);
+                valueBar.fillRoundedRect(panelPadding + 3, y + 28, (barWidth - 6) * value, 24, 12);
+            }
+        };
+    }
+    
+    createActionButton(text, y, onClick, panelWidth, colors) {
+        const panelPadding = 24;
+        const buttonWidth = panelWidth - (panelPadding * 2);
 
-    // Toasts
-    this.game.events.on('toast', (t) => {
-      const y = 70;
-      const txt = this.add.text(12, y, t.msg, {
-        fontSize:'12px',
-        color: t.type==='ok' ? '#10b981' : '#f59e0b',
-        backgroundColor: 'rgba(0,0,0,0.5)'
-      }).setPadding(6,4,6,4).setScrollFactor(0);
-      this.tweens.add({ targets: txt, alpha: 0, duration: 1200, delay: 600, onComplete:()=>txt.destroy() });
-    });
-  }
+        const buttonBg = this.add.graphics();
+        buttonBg.fillStyle(colors.actionButton);
+        buttonBg.fillRoundedRect(panelPadding, y, buttonWidth, 60, 16);
+        
+        const buttonText = this.add.text(panelWidth / 2, y + 30, text, { fontSize: '24px', color: colors.textPrimary, fontStyle: 'bold' }).setOrigin(0.5);
 
-  update() {
-    const fps = Math.floor(this.game.loop.actualFps || 0);
-    this.fpsText.setText('FPS: ' + fps);
-      // Fecha/avance del nivel
-    const d = getSimDate();
-    const dayN = getSimDayNumber();
-    const L = LEVELS[TimeState.levelIdx];
+        const hitArea = new Phaser.Geom.Rectangle(panelPadding, y, buttonWidth, 60);
+        buttonBg.setInteractive(hitArea, Phaser.Geom.Rectangle.Contains).on('pointerdown', onClick);
+        
+        buttonBg.on('pointerover', () => buttonBg.fillColor = colors.actionButtonHover);
+        buttonBg.on('pointerout', () => buttonBg.fillColor = colors.actionButton);
+        
+        return [buttonBg, buttonText];
+    }
 
-    this.clockText.setText(
-      `${L.name} — Día ${dayN}/${TimeState.levelDays} — ` +
-      `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
-    );
+    update() {
+        // Por ahora, usamos mockState para ver la UI animada.
+        // La misión es reemplazar esto con los datos reales del juego.
+        const useMockState = true;
+        
+        if (useMockState) {
+            const time = this.time.now;
+            const mockState = {
+                hp: 0.75 + Math.sin(time / 1000) * 0.25,
+                heat: 0.40 + Math.cos(time / 800) * 0.30,
+                water: 0.50 + Math.sin(time / 1200) * 0.40,
+                humidity: 0.60 + Math.cos(time / 1500) * 0.10,
+                money: 0.85 + Math.sin(time / 2000) * 0.05,
+                energy: 0.90 + Math.cos(time / 500) * 0.10
+            };
+            Object.keys(this.bars).forEach(key => {
+                this.bars[key].update(mockState[key]);
+            });
+        } else {
+            // CÓDIGO FINAL: Conectar al estado real del juego
+            const player = findFirstPlayer();
+            const parcela = player ? repoGet('parcelas', player.parcelaSeleccionadaId) : null;
+            if (parcela) {
+                const cultivo = parcela.cultivoId ? repoGet('cultivos', parcela.cultivoId) : null;
+                const agua = parcela.aguaId ? repoGet('recursos', parcela.aguaId) : null;
+                this.bars.hp.update(cultivo ? cultivo.progreso : 0);
+                this.bars.water.update(agua ? agua.nivel : 0);
+            }
+            this.bars.money.update(player ? player.cartera / 10000 : 0); // Asumiendo un máximo de 10,000
+        }
 
-    const player = findFirstPlayer();
-    this.moneyText.setText(`₲ ${player ? player.cartera.toFixed(0) : 0}`);
-
-    // Renderizar alertas activas (últimas 5 visibles)
-    const alerts = repoAll('alertas').filter(a=>a.visible!==false).slice(-5);
-    const text = ['Alertas:'].concat(alerts.map(a => `• ${a.mensaje}`)).join('\n');
-    this.alertsText.setText(text);
-  }
+        // Actualizar textos que dependen del estado del tiempo y jugador
+        this.dayText.setText(`Día: ${getSimDayNumber()}`);
+        const player = findFirstPlayer();
+        if(player) {
+            this.playerNameText.setText(window.__CV_START__?.profile?.name || 'Agente');
+        }
+    }
 }
