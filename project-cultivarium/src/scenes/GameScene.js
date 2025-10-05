@@ -209,6 +209,7 @@ export default class GameScene extends Phaser.Scene {
 
   create() {
     startLevel(0);
+    State.clima = { temperatura: 28, humedad: 60, evento: 'NINGUNO' };//Agrupa clima inicial
     console.log('[Game] create', window.__CV_START__); 
     // Activa que solo el objeto “más arriba” reciba el click
     if (this.input?.setTopOnly) this.input.setTopOnly(true);
@@ -488,7 +489,10 @@ this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
     this.game.events.emit('inspect:parcela', {
       id: p?.id, saludSuelo: p?.saludSuelo?.toFixed(2),
       cultivo: c ? { tipo: c.tipo, etapa: c.etapa, progreso: c.progreso.toFixed(2) } : null,
-      agua: agua ? { nivel: Number(agua.nivel).toFixed(2) } : null
+      agua: agua ? { nivel: Number(agua.nivel).toFixed(2) } : null,
+      plagaActiva: p.plagaActiva,      // 
+      riesgoPlaga: p.riesgoPlaga,      // 
+      intensidadPlaga: p.intensidadPlaga  // 
     });
 
     const sprite = this.spriteByParcela.get(id);          // 👈
