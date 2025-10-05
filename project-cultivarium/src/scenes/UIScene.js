@@ -1,312 +1,459 @@
 import Phaser from 'phaser';
 import { State, repoAll, findFirstPlayer, repoGet } from '../core/state.js';
-import { TimeState, getSimDate, getSimDayNumber } from '../core/time.js';
+import { TimeState, getSimDate, getSimDayNumber, LEVELS } from '../core/time.js';
 
 export default class UIScene extends Phaser.Scene {
-    constructor() {
-        super('UI');
-        this.actionButtons = []; // Almacenará los botones para desactivación dinámica
-    }
+  constructor() {
+    super('UI');
+    // Inicialización de todas las propiedades a null y control del Tween
+    this.actionButtons = []; 
+    this.bars = null;
+    this.colors = null;
+    this.fpsText = null;
+    this.clockText = null;
+    this.moneyText = null;
+    this.inspectText = null;
+    this.alertsText = null;
+    this.dayText = null;
+    this.playerNameText = null;
+    this.heatAlertTween = null; // Control del Tween
+  }
 
-    create() {
-        const screenWidth = this.scale.width;
-        const screenHeight = this.scale.height;
+  create() {
+    const screenW = this.scale.width;
+    const screenH = this.scale.height;
 
-        // Paleta de colores OFICIAL "Low Poly Eco-Futurista Dual"
-        const colors = {
-            // Paleta Tierra (Acciones / Fondos del juego)
-            panelBg: 0x9A6B41,
-            panelBorder: 0x5B3A29,
-            actionButton: 0x8DA86C,
-            actionButtonHover: 0x79a83c,
-            actionButtonDisabled: 0x5E7A47,
-            
-            // Paleta Espacio/Data (Status / Diagramas)
-            dataPanelBg: 0x1a202c, // Gris azulado oscuro para el panel de Status
-            dataAccent: 0x00FFD1, // Turquesa NASA para acentos científicos
-            
-            // Textos
-            textPrimary: '#F4F0E1',
-            textSecondary: '#E6D6A6',
-            
-            // Barras de HUD
-            bar: {
-                // NDVI es la métrica satelital clave, usa Turquesa NASA como acento
-                hp: 0x00FFD1, // Turquesa NASA (NDVI/Salud)
-                heat: 0xf87171, // Rojo (Estrés por Calor)
-                water: 0x60a5fa, // Azul (SMAP/Humedad)
-                humidity: 0xfbbf24, // Amarillo (Atm.)
-                money: 0xf59e0b, // Naranja
-                energy: 0xc084fc // Púrpura
-            },
-            feedback: { success: 0x00FFD1, error: 0xf87171 }
-        };
+    // ===== Paleta Eco-Futurista (Ajustes para coherencia visual) =====
+    const colors = {
+      // Tierra (Acciones)
+      panelBg: 0x9A6B41,
+      panelBorder: 0x5B3A29,
+      actionButton: 0x8DA86C,
+      actionButtonHover: 0x79a83c,
+      actionButtonDisabled: 0x5E7A47,
 
-        // Panel Izquierdo (Status - Data/Espacio)
-        this.statusPanel = this.createCollapsiblePanel(0, 0, 320, screenHeight, 'left', colors, colors.dataPanelBg);
-        this.populateStatusPanel(this.statusPanel, colors);
+      // Espacio/Data (Status)
+      dataPanelBg: 0x1a202c,
+      dataAccent: 0x00FFD1, // Turquesa NASA
+      
+      // Textos y Feedback
+      textPrimary: '#F4F0E1',
+      textSecondary: '#E6D6A6',
+      feedback: { success: 0x00FFD1, error: 0xf87171 },
+      
+      // Barras
+      bar: {
+        hp: 0x00FFD1, // NDVI (Turquesa NASA)
+        heat: 0xf87171, // Rojo (Estrés por Calor)
+        water: 0x60a5fa, // Azul (SMAP)
+        humidity: 0xfbbf24, // Amarillo (GPM/Lluvia)
+        money: 0xf59e0b, 
+        energy: 0xc084fc 
+      },
+    };
+    this.colors = colors;
+    this.actionButtons = []; 
 
-        // Panel Derecho (Acciones - Tierra/Game World)
-        this.actionPanel = this.createCollapsiblePanel(screenWidth, 0, 280, screenHeight, 'right', colors, colors.panelBg);
-        this.populateActionPanel(this.actionPanel, colors);
-        
-        // Almacenar colores para el update
-        this.colors = colors;
-    }
+    // ===== Panel Izquierdo (Status/Data + Inspección + Alertas) =====
+    this.statusPanel = this.createCollapsiblePanel(0, 0, 340, screenH, 'left', colors, colors.dataPanelBg);
+    this.populateStatusPanel(this.statusPanel, colors);
 
-    createCollapsiblePanel(x, y, width, height, side, colors, bgColor) {
-        const container = this.add.container(x, y);
-        if (side === 'right') container.x -= width;
+    // ===== Panel Derecho (Acciones) =====
+    this.actionPanel = this.createCollapsiblePanel(screenW, 0, 300, screenH, 'right', colors, colors.panelBg);
+    this.populateActionPanel(this.actionPanel, colors);
 
-        const panelBg = this.add.graphics().fillStyle(bgColor, 0.9).fillRoundedRect(0, 0, width, height, (side === 'left' ? { tr: 16, br: 16 } : { tl: 16, bl: 16 }));
-        panelBg.lineStyle(4, colors.panelBorder).strokeRoundedRect(0, 0, width, height, (side === 'left' ? { tr: 16, br: 16 } : { tl: 16, bl: 16 }));
-        container.add(panelBg);
+    // ===== HUD Principal (Elementos Fijos y Vitales) =====
+    this.clockText = this.add.text(screenW / 2, 10, 'Nivel — Día 1', { fontSize: '14px', color: colors.textPrimary, fontStyle: 'bold', backgroundColor: 'rgba(0,0,0,0.5)', padding: { x: 10, y: 5 } }).setOrigin(0.5, 0).setDepth(100);
+    this.fpsText = this.add.text(screenW - 10, 10, 'FPS: 60', { fontSize: '10px', color: colors.dataAccent, backgroundColor: 'rgba(0,0,0,0.3)' }).setOrigin(1, 0).setDepth(100);
+    this.moneyText = this.add.text(screenW / 2, 35, '₲ 0', { fontSize: '24px', color: colors.bar.money, fontStyle: 'bold', backgroundColor: 'rgba(0,0,0,0.5)', padding: { x: 12, y: 5 } }).setOrigin(0.5, 0).setDepth(100);
 
-        const toggleButton = this.add.text(side === 'left' ? width - 25 : 25, height / 2, side === 'left' ? '◀' : '▶', { fontSize: '32px', color: colors.textPrimary, fontStyle: 'bold' }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-        container.add(toggleButton);
+    // Inicializa la animación de alerta crítica (Estrés por Calor)
+    // Se inicializa el tween en el fondo de la barra de calor, el cual ya está creado en populateStatusPanel
+    this.heatAlertTween = this.tweens.add({
+      targets: this.bars.heat.bg,
+      alpha: 0.3,
+      duration: 500,
+      yoyo: true, 
+      repeat: -1, 
+      paused: true 
+    });
 
-        let isCollapsed = false;
-        toggleButton.on('pointerdown', () => {
-            isCollapsed = !isCollapsed;
-            this.tweens.add({ targets: container, x: isCollapsed ? (side === 'left' ? -width + 50 : this.scale.width - 50) : (side === 'left' ? 0 : this.scale.width - width), duration: 300, ease: 'Cubic.easeInOut' });
-            toggleButton.setText(isCollapsed ? (side === 'left' ? '▶' : '◀') : (side === 'left' ? '◀' : '▶'));
-        });
+    // ===== Listeners de juego (Toasts y Inspección) =====
+    this.game.events.on('inspect:parcela', (data) => {
+      const lines = [
+        `Parcela: #${data.id}`,
+        `Suelo: ${data.saludSuelo ? (data.saludSuelo * 100).toFixed(0) + '%' : '??'}`,
+        data.cultivo ? `Cultivo: ${data.cultivo.tipo} (${data.cultivo.etapa} ${(data.cultivo.progreso * 100).toFixed(0)}%)` : 'Cultivo: -',
+        data.agua ? `Agua: ${(data.agua.nivel * 100).toFixed(0)}%` : 'Agua: -'
+      ];
+      this.inspectText.setText(lines.join('\n'));
+    });
 
-        return { container, width, height, side };
-    }
+    this.game.events.on('toast', (t) => {
+      this.showActionFeedback(t.msg, t.type === 'ok' ? colors.feedback.success : colors.feedback.error);
+    });
+  }
 
-    populateStatusPanel(panel, colors) {
-        const container = panel.container;
-        const panelWidth = panel.width;
-        let currentY = 24;
+  // ---------- Panel colapsable ----------
+  createCollapsiblePanel(x, y, width, height, side, colors, bgColor) {
+    const container = this.add.container(x, y).setDepth(99);
+    if (side === 'right') container.x -= width;
 
-        this.playerNameText = this.add.text(panelWidth / 2, currentY, 'Agente', { fontSize: '28px', color: colors.dataAccent, fontStyle: 'bold' }).setOrigin(0.5, 0); // Nombre con acento Turquesa
-        this.locationText = this.add.text(panelWidth / 2, currentY += 35, 'Pampa Húmeda, AR', { fontSize: '20px', color: colors.textSecondary }).setOrigin(0.5, 0);
-        
-        // Estilo mejorado para el Día (resaltando el avance del tiempo)
-        this.dayText = this.add.text(panelWidth / 2, currentY += 35, 'Día: 1', { 
-            fontSize: '20px', color: colors.textPrimary, fontStyle: '600', 
-            backgroundColor: Phaser.Display.Color.IntegerToColor(colors.dataAccent).rgba, // Fondo Turquesa NASA
-            padding: { x: 16, y: 8 }, align: 'center', 
-            cornerRadius: 8 
-        }).setOrigin(0.5, 0);
-        
-        currentY += 60;
-        
-        // Títulos de las barras actualizados para reflejar la Data Trinity
-        this.bars = {
-            hp: this.createHudBar('SALUD (NDVI)', currentY, colors.bar.hp, panelWidth, colors),
-            heat: this.createHudBar('CALOR (Estrés)', currentY += 70, colors.bar.heat, panelWidth, colors),
-            water: this.createHudBar('HUMEDAD (SMAP RZSM)', currentY += 70, colors.bar.water, panelWidth, colors),
-            humidity: this.createHudBar('LLUVIA (GPM)', currentY += 70, colors.bar.humidity, panelWidth, colors), // GPM como indicador de entrada
-            money: this.createHudBar('DINERO ($)', currentY += 70, colors.bar.money, panelWidth, colors),
-            energy: this.createHudBar('ENERGÍA (⚡)', currentY += 70, colors.bar.energy, panelWidth, colors),
-        };
+    const rads = (side === 'left' ? { tr: 16, br: 16 } : { tl: 16, bl: 16 });
 
-        Object.values(this.bars).forEach(bar => container.add(bar.elements));
-        container.add([this.playerNameText, this.locationText, this.dayText]);
-    }
+    const panelBg = this.add.graphics();
+    panelBg.fillStyle(bgColor, 0.9).fillRoundedRect(0, 0, width, height, rads);
+    panelBg.lineStyle(4, colors.panelBorder).strokeRoundedRect(0, 0, width, height, rads); 
 
-    populateActionPanel(panel, colors) {
-        const container = panel.container;
-        const panelWidth = panel.width;
-        let currentY = 24;
-        const title = this.add.text(panelWidth / 2, currentY, 'Decisiones', { fontSize: '28px', color: colors.textPrimary, fontStyle: 'bold' }).setOrigin(0.5, 0);
-        currentY += 70;
+    const toggleButton = this.add.text(
+      side === 'left' ? width - 25 : 25,
+      height / 2,
+      side === 'left' ? '◀' : '▶',
+      { fontSize: '32px', color: colors.textPrimary, fontStyle: 'bold' }
+    ).setOrigin(0.5).setInteractive({ useHandCursor: true });
 
-        // --- BOTONES CLAVE (DECISIONES AGRÍCOLAS) ---
-        this.actionButtons = []; // Reinicializar y usar this.actionButtons para el loop de update
-        
-        this.actionButtons.push(this.createActionButton('💧 Regar', currentY, () => {
-            this.game.events.emit('action:perform', { actionType: 'REGAR' });
-            this.showActionFeedback('💧 Riego ejecutado', colors.feedback.success);
-        }, panelWidth, colors));
+    container.add([panelBg, toggleButton]);
 
-        this.actionButtons.push(this.createActionButton('🌱 Sembrar', currentY += 65, () => {
-            this.game.events.emit('action:perform', { actionType: 'SEMBRAR' });
-            this.showActionFeedback('🌱 Siembra iniciada', colors.feedback.success);
-        }, panelWidth, colors));
+    let isCollapsed = false;
+    toggleButton.on('pointerdown', () => {
+      isCollapsed = !isCollapsed;
+      this.tweens.add({
+        targets: container,
+        x: isCollapsed ? (side === 'left' ? -width + 50 : this.scale.width - 50) : (side === 'left' ? 0 : this.scale.width - width),
+        duration: 300,
+        ease: 'Cubic.easeInOut'
+      });
+      toggleButton.setText(isCollapsed ? (side === 'left' ? '▶' : '◀') : (side === 'left' ? '◀' : '▶'));
+    });
 
-        this.actionButtons.push(this.createActionButton('🌾 Cosechar', currentY += 65, () => {
-            this.game.events.emit('action:perform', { actionType: 'COSECHAR' });
-             this.showActionFeedback('🌾 Cosecha intentada', 0xfbbf24); // Feedback diferente
-        }, panelWidth, colors));
+    return { container, width, height, side };
+  }
 
-        // Separador visual
-        const separator = this.add.graphics().fillStyle(colors.panelBorder, 0.5).fillRect(16, currentY += 55, panelWidth - 32, 2);
-        container.add(separator);
-        currentY += 15;
+  // ---------- Status/Data + Inspección + Alertas ----------
+  populateStatusPanel(panel, colors) {
+    const container = panel.container;
+    const W = panel.width;
+    let y = 20;
 
-        // --- BOTONES AVANZADOS (ESTRATEGIA / TECNOLOGÍA) ---
-        this.actionButtons.push(this.createActionButton('⚙️ Mejorar', currentY, () => {
-            this.game.events.emit('action:perform', { actionType: 'UPGRADE_TECH' });
-             this.showActionFeedback('⚙️ Abriendo Tech-Tree', colors.dataAccent); // Feedback con acento NASA
-        }, panelWidth, colors));
-        
-        this.actionButtons.push(this.createActionButton('🛰️ Escanear (Data)', currentY += 65, () => {
-            this.game.events.emit('action:perform', { actionType: 'SCAN_REGION' });
-            this.showActionFeedback('🛰️ Extrayendo Data NASA...', colors.dataAccent);
-        }, panelWidth, colors));
-        
-        this.actionButtons.push(this.createActionButton('💰 Vender Cosecha', currentY += 65, () => {
-            this.game.events.emit('action:perform', { actionType: 'SELL_HARVEST' });
-            this.showActionFeedback('💰 Mercado actualizado', colors.bar.money);
-        }, panelWidth, colors));
+    // Nombre / Ubicación
+    this.playerNameText = this.add.text(W / 2, y, 'Agente', { fontSize: '24px', color: colors.dataAccent, fontStyle: 'bold' }).setOrigin(0.5, 0); 
+    this.locationText   = this.add.text(W / 2, y += 30, 'Pampa Húmeda, AR', { fontSize: '16px', color: colors.textSecondary }).setOrigin(0.5, 0);
 
-        container.add([title, ...this.actionButtons.map(b => b.elements).flat()]);
-    }
-    
-    showActionFeedback(msg, colorHex) {
-        const feedbackText = this.add.text(this.scale.width / 2, this.scale.height - 100, msg, {
-            fontSize: '24px', 
-            color: Phaser.Display.Color.IntegerToColor(colorHex).rgba,
-            fontStyle: 'bold', 
-            backgroundColor: 'rgba(0,0,0,0.7)',
-            padding: { x: 20, y: 10 }, 
-            borderRadius: 10 // Cambiado a borderRadius para mayor compatibilidad
-        }).setOrigin(0.5);
+    // Día destacado (Aplica colores Data Accent)
+    this.dayText = this.add.text(W / 2, y += 30, 'Día: 1', {
+      fontSize: '18px',
+      color: colors.dataPanelBg, 
+      fontStyle: '600',
+      backgroundColor: Phaser.Display.Color.IntegerToColor(colors.dataAccent).rgba, 
+      padding: { x: 12, y: 6 },
+      align: 'center'
+    }).setOrigin(0.5, 0);
 
-        this.tweens.add({
-            targets: feedbackText, 
-            y: feedbackText.y - 70, 
-            alpha: 0,
-            duration: 1500, 
-            ease: 'Cubic.easeOut',
-            onComplete: () => feedbackText.destroy()
-        });
-    }
+    y += 48;
 
-    createHudBar(label, y, color, panelWidth, colors) {
-        const panelPadding = 24; const barWidth = panelWidth - (panelPadding * 2);
-        
-        // Título de la barra (NDVI y SMAP son conceptos clave a memorizar)
-        const labelText = this.add.text(panelPadding, y, label, { 
-            fontSize: '16px', 
-            color: label.includes('NDVI') || label.includes('SMAP') ? colors.dataAccent : colors.textPrimary, // Resaltar Data Trinity
-            fontStyle: 'bold' 
-        });
+    // Barras
+    this.bars = {
+      hp:       this.createHudBar('SALUD (NDVI)', y, colors.bar.hp, W, colors),
+      heat:     this.createHudBar('CALOR (Estrés)', y += 66, colors.bar.heat, W, colors),
+      water:    this.createHudBar('HUMEDAD (SMAP RZSM)', y += 66, colors.bar.water, W, colors),
+      humidity: this.createHudBar('LLUVIA (GPM)', y += 66, colors.bar.humidity, W, colors),
+      money:    this.createHudBar('DINERO ($)', y += 66, colors.bar.money, W, colors),
+      energy:   this.createHudBar('ENERGÍA (⚡)', y += 66, colors.bar.energy, W, colors),
+    };
+    Object.values(this.bars).forEach(bar => container.add(bar.elements));
 
-        const valueText = this.add.text(panelWidth - panelPadding, y, '0%', { fontSize: '16px', color: colors.textSecondary, fontStyle: 'bold' }).setOrigin(1, 0);
-        
-        const bgBar = this.add.graphics();
-        bgBar.fillStyle(0x000000, 0.3);
-        bgBar.fillRoundedRect(panelPadding, y + 25, barWidth, 30, 15);
-        bgBar.lineStyle(2, colors.panelBorder);
-        bgBar.strokeRoundedRect(panelPadding, y + 25, barWidth, 30, 15);
+    // Separadores y Bloques de Información
+    const sep1 = this.add.graphics().fillStyle(colors.panelBorder, 0.5).fillRect(16, y += 58, W - 32, 2);
+    container.add(sep1);
+    y += 12;
 
-        const valueBar = this.add.graphics();
-        
-        return { 
-            elements: [labelText, valueText, bgBar, valueBar], 
-            update: (value) => { // value es un número entre 0 y 1
-                value = Phaser.Math.Clamp(value, 0, 1);
-                // El texto de dinero muestra el valor real, no un porcentaje
-                let displayValue = (label.includes('DINERO')) ? `$${(value * 10000).toFixed(0)}` : `${(value * 100).toFixed(0)}%`;
-                
-                valueText.setText(displayValue);
-                valueBar.clear();
-                valueBar.fillStyle(color);
-                valueBar.fillRoundedRect(panelPadding + 3, y + 28, (barWidth - 6) * value, 24, 12);
-            }
-        };
-    }
-    
-    createActionButton(text, y, onClick, panelWidth, colors) {
-        const panelPadding = 24; const buttonWidth = panelWidth - (panelPadding * 2);
-        const buttonBg = this.add.graphics().fillStyle(colors.actionButton).fillRoundedRect(panelPadding, y, buttonWidth, 55, 16);
-        const buttonText = this.add.text(panelWidth / 2, y + 27.5, text, { fontSize: '22px', color: colors.textPrimary, fontStyle: 'bold' }).setOrigin(0.5);
-        
-        const hitArea = new Phaser.Geom.Rectangle(panelPadding, y, buttonWidth, 55);
-        buttonBg.setInteractive(hitArea, Phaser.Geom.Rectangle.Contains);
+    this.inspectTitle = this.add.text(24, y, '🔬 Inspección de Parcela', { fontSize: '18px', color: colors.dataAccent, fontStyle: 'bold' });
+    this.inspectText  = this.add.text(24, y + 24, 'Selecciona una parcela…', { fontSize: '12px', color: colors.textSecondary, wordWrap: { width: W - 48 } });
 
-        // --- FEEDBACK TÁCTIL MEJORADO ---
-        buttonBg.on('pointerdown', () => {
-            if (buttonBg.input.enabled) {
-                this.tweens.add({ targets: [buttonBg, buttonText], scale: 0.95, duration: 80, yoyo: true, ease: 'Quad.easeInOut' });
-                onClick();
-            }
-        });
-        buttonBg.on('pointerover', () => { if(buttonBg.input.enabled) buttonBg.fillColor = colors.actionButtonHover; });
-        buttonBg.on('pointerout', () => { if(buttonBg.input.enabled) buttonBg.fillColor = colors.actionButton; });
-        
-        return { elements: [buttonBg, buttonText], bg: buttonBg, text: buttonText };
-    }
+    container.add([this.playerNameText, this.locationText, this.dayText, this.inspectTitle, this.inspectText]);
 
-    update() {
-        // La variable useMockState se define dentro de update() en la versión original.
-        // La mantendremos para fines de demostración de UI.
-        const useMockState = true; 
-        
-        // Variables de estado real
-        let hasEnergy = true; 
-        let canAfford = true;
-        const colors = this.colors; // Usar los colores almacenados en 'this'
-        
-        // --- 1. Lógica de Actualización de Barras ---
-        if (useMockState) {
-            // MOCK STATE (para demo)
-            const time = this.time.now;
-            const mockState = {
-                hp: 0.75 + Math.sin(time / 1000) * 0.25, 
-                heat: 0.40 + Math.cos(time / 800) * 0.30,
-                water: 0.50 + Math.sin(time / 1200) * 0.40,
-                humidity: 0.60 + Math.cos(time / 1500) * 0.10,
-                money: 0.85 + Math.sin(time / 2000) * 0.05,
-                energy: 0.90 + Math.cos(time / 500) * 0.10
-            };
-            Object.keys(this.bars).forEach(key => {
-                this.bars[key].update(Phaser.Math.Clamp(mockState[key], 0, 1));
-            });
-            hasEnergy = mockState.energy > 0.1; // Menos del 10% es sin energía
-            canAfford = mockState.money > 0.1; 
+    const sep2 = this.add.graphics().fillStyle(colors.panelBorder, 0.5).fillRect(16, y += 110, W - 32, 2);
+    container.add(sep2);
+    y += 12;
+
+    this.alertsTitle = this.add.text(24, y, '⚠️ Alertas del Sistema', { fontSize: '18px', color: colors.bar.heat, fontStyle: 'bold' });
+    this.alertsText  = this.add.text(24, y + 24, 'No hay alertas activas.', { fontSize: '12px', color: colors.textPrimary, wordWrap: { width: W - 48 } });
+    container.add([this.alertsTitle, this.alertsText]);
+  }
+
+  // ---------- Panel de Acciones ----------
+  populateActionPanel(panel, colors) {
+    const container = panel.container;
+    const W = panel.width;
+    let y = 20;
+
+    const title = this.add.text(W / 2, y, 'Decisiones', { fontSize: '24px', color: colors.textPrimary, fontStyle: 'bold' }).setOrigin(0.5, 0);
+    container.add(title);
+    y += 60;
+
+    const makeBtn = (label, onDirectCall, eventType, feedbackMsg, feedbackColor) => {
+      const btn = this.createActionButton(label, y, () => {
+        const gameScene = this.game.scene.get('Game');
+        if (gameScene && typeof gameScene[onDirectCall] === 'function') {
+          gameScene[onDirectCall]();
         } else {
-            // LÓGICA DE ESTADO REAL (A IMPLEMENTAR)
-            const player = findFirstPlayer();
-            const parcela = player ? repoGet('parcelas', player.parcelaSeleccionadaId) : null;
-            
-            if (parcela) { 
-                // Actualizar barras de parcela (NDVI, SMAP, etc.)
-                this.bars.hp.update(parcela.saludNDVI || 0); // NDVI
-                this.bars.water.update(parcela.humedadSueloSMAP || 0); // SMAP
-                this.bars.heat.update(parcela.estresTermico || 0); // Estrés Térmico (inverso: 1 - estres)
-            }
-            if (player) {
-                // Actualizar barras de jugador (Money, Energy)
-                this.bars.money.update(player.cartera / 10000); // 10000 como máximo asumido
-                this.bars.energy.update(player.energiaActual / player.energiaMax);
-                hasEnergy = player.energiaActual > (player.energiaMax * 0.1);
-                canAfford = player.cartera > 50; // Asumimos 50 como coste mínimo
-            }
+          this.game.events.emit('action:perform', { actionType: eventType });
         }
-        
-        // --- 2. Lógica de Desactivación Dinámica ---
-        this.actionButtons.forEach(button => {
-            // Lógica simplificada: Desactivar si no hay energía O no hay dinero
-            const isEnabled = hasEnergy && canAfford; 
-            
-            button.bg.setAlpha(isEnabled ? 1 : 0.5);
-            
-            if (isEnabled) {
-                // Activar interacciones
-                if (!button.bg.input.enabled) {
-                    button.bg.setInteractive({ useHandCursor: true });
-                    button.bg.fillColor = colors.actionButton;
-                }
-            } else {
-                // Desactivar interacciones
-                if (button.bg.input.enabled) {
-                    button.bg.disableInteractive();
-                    button.bg.fillColor = colors.actionButtonDisabled;
-                }
+        this.showActionFeedback(feedbackMsg, feedbackColor);
+      }, W, colors);
+      container.add(btn.elements);
+      this.actionButtons.push(btn);
+      y += 65;
+      return btn;
+    };
+
+    // Botones clave
+    makeBtn('🚜 Arar',     'plowSelected',   'ARAR',         '🚜 Arado ejecutado', colors.feedback.success);
+    makeBtn('💧 Regar',    'waterSelected',  'REGAR',        '💧 Riego ejecutado', colors.feedback.success);
+    makeBtn('🌱 Sembrar',  'plantSelected',  'SEMBRAR',      '🌱 Sembrando Cultivo', colors.feedback.success);
+    makeBtn('🌾 Cosechar', 'harvestSelected','COSECHAR',     '🌾 Cosecha intentada', 0xfbbf24);
+
+    // Separador
+    const sep = this.add.graphics().fillStyle(colors.panelBorder, 0.5).fillRect(16, y += 40, W - 32, 2);
+    container.add(sep);
+    y += 12;
+
+    // Avanzados / Tech
+    makeBtn('⚙️ Mejorar (Tech)',    null, 'UPGRADE_TECH', '⚙️ Abriendo Tech-Tree', colors.dataAccent);
+    makeBtn('🛰️ Escanear (Data)', null, 'SCAN_REGION', '🛰️ Extrayendo Data NASA...', colors.dataAccent);
+    makeBtn('💰 Vender Cosecha',   null, 'SELL_HARVEST','💰 Mercado actualizado', colors.bar.money);
+  }
+    
+  // ---------- Feedback flotante ----------
+  showActionFeedback(msg, colorHex) {
+    const feedbackText = this.add.text(this.scale.width / 2, this.scale.height - 100, msg, {
+      fontSize: '20px',
+      color: Phaser.Display.Color.IntegerToColor(colorHex).rgba,
+      fontStyle: 'bold',
+      backgroundColor: 'rgba(0,0,0,0.7)',
+      padding: { x: 16, y: 8 },
+      borderRadius: 10
+    }).setOrigin(0.5).setDepth(100);
+
+    this.tweens.add({
+      targets: feedbackText,
+      y: feedbackText.y - 70,
+      alpha: 0,
+      duration: 1500,
+      ease: 'Cubic.easeOut',
+      onComplete: () => feedbackText.destroy()
+    });
+  }
+
+  // ---------- Barra HUD reutilizable (Con export de valor para alertas) ----------
+  createHudBar(label, y, color, panelWidth, colors) {
+    const pad = 24;
+    const barW = panelWidth - (pad * 2);
+
+    const labelText = this.add.text(pad, y, label, {
+      fontSize: '14px',
+      color: (label.includes('NDVI') || label.includes('SMAP')) ? colors.dataAccent : colors.textPrimary,
+      fontStyle: 'bold'
+    });
+
+    const valueText = this.add.text(panelWidth - pad, y, '0%', { fontSize: '14px', color: colors.textSecondary, fontStyle: 'bold' }).setOrigin(1, 0);
+
+    const bgBar = this.add.graphics();
+    bgBar.fillStyle(0x000000, 0.30);
+    bgBar.fillRoundedRect(pad, y + 22, barW, 24, 12);
+    bgBar.lineStyle(2, colors.panelBorder).strokeRoundedRect(pad, y + 22, barW, 24, 12);
+
+    const valueBar = this.add.graphics();
+    
+    let updateValue = 0; 
+
+    return {
+      elements: [labelText, valueText, bgBar, valueBar],
+      bg: bgBar, // Exportamos el background para efectos de alerta (Causal-Reactiva)
+      update: (v) => {
+        v = Phaser.Math.Clamp(v, 0, 1);
+        updateValue = v; // Guarda el valor para el control de alerta
+        const disp = (label.includes('DINERO')) ? `₲ ${(v * 10000).toFixed(0)}` : `${(v * 100).toFixed(0)}%`;
+        valueText.setText(disp);
+        valueBar.clear();
+        valueBar.fillStyle(color);
+        valueBar.fillRoundedRect(pad + 3, y + 25, (barW - 6) * v, 18, 9);
+      },
+      get updateValue() { return updateValue; } // Exporta el valor
+    };
+  }
+
+  // ---------- Botón de acción (Máxima Retroalimentación Táctil) ----------
+  createActionButton(text, y, onClick, panelWidth, colors) {
+    const pad = 24;
+    const width = panelWidth - (pad * 2);
+    const height = 55;
+
+    const bg = this.add.graphics();
+    bg.fillStyle(colors.actionButton).fillRoundedRect(pad, y, width, height, 14);
+    bg.lineStyle(2, colors.panelBorder).strokeRoundedRect(pad, y, width, height, 14);
+
+    const t = this.add.text(panelWidth / 2, y + height / 2, text, { fontSize: '20px', color: colors.textPrimary, fontStyle: 'bold' }).setOrigin(0.5);
+
+    const hitArea = new Phaser.Geom.Rectangle(pad, y, width, height);
+    bg.setInteractive(hitArea, Phaser.Geom.Rectangle.Contains);
+
+    // LÓGICA DE CINEMÁTICA Y RECHAZO
+    bg.on('pointerdown', () => {
+      if (bg.input.enabled) {
+        // EFECTO DE PRESIÓN: Escala el botón (EL EFECTO CLAVE)
+        this.tweens.add({ targets: [bg, t], scale: 0.96, duration: 80, yoyo: true, ease: 'Quad.easeInOut' }); 
+        onClick();
+      } else {
+        // EFECTO DE RECHAZO: El botón se "sacude"
+        this.tweens.add({ targets: bg, x: bg.x + 5, duration: 50, yoyo: true, repeat: 1, ease: 'Sine.easeInOut' });
+        this.showActionFeedback('🚫 ¡Acción Bloqueada! Falta energía o dinero.', colors.bar.heat);
+      }
+    });
+    
+    bg.on('pointerover', () => { if (bg.input.enabled) bg.fillColor = colors.actionButtonHover; });
+    bg.on('pointerout',  () => { if (bg.input.enabled) bg.fillColor = colors.actionButton; });
+
+    return { elements: [bg, t], bg, text: t };
+  }
+
+  // ---------- Update (Controla la lógica de estado y efectos) ----------
+  update() {
+    // Definiciones de Scope y Variables
+    const player = findFirstPlayer();
+    const p = player;
+    const parcela = p ? repoGet('parcelas', p.parcelaSeleccionadaId) : null;
+    const colors = this.colors;
+    const dayN = getSimDayNumber(); // Corregido: dayN debe estar definido aquí para el scope
+    const L = LEVELS?.[TimeState.levelIdx] || { name: 'Nivel' }; // Corregido: L debe estar definido aquí
+    
+    let hasEnergy = true;
+    let canAfford = true;
+    let heatValue = 0;
+
+    // --- 1. Lógica de Estado Real / Mock ---
+    const useMockState = true; 
+
+    if (useMockState) {
+        // Lógica MOCK (se omite para brevedad)
+         const time = this.time.now;
+         const mock = {
+            hp: 0.75 + Math.sin(time / 1000) * 0.25,
+            heat: 0.40 + Math.cos(time / 800)  * 0.30,
+            water: 0.50 + Math.sin(time / 1200) * 0.40,
+            humidity: 0.60 + Math.cos(time / 1500) * 0.10,
+            money: 0.85 + Math.sin(time / 2000) * 0.05,
+            energy: 0.90 + Math.cos(time / 500)  * 0.10
+         };
+         Object.keys(this.bars).forEach(k => this.bars[k].update(Phaser.Math.Clamp(mock[k], 0, 1)));
+         hasEnergy = mock.energy > 0.1;
+         canAfford = mock.money > 0.1;
+         heatValue = mock.heat;
+    } else if (this.bars) {
+      // Estado real (si this.bars existe)
+      if (parcela) {
+        this.bars.hp.update(parcela.saludNDVI ?? 0); 
+        this.bars.water.update(parcela.humedadSueloSMAP ?? 0);
+        this.bars.heat.update(parcela.estresTermico ?? 0);
+        heatValue = parcela.estresTermico ?? 0;
+      }
+      this.bars.humidity.update(State?.clima?.lluviaGPM ?? 0); 
+      
+      if (p) {
+        const eMax = p.energiaMax || 1;
+        this.bars.money.update((p.cartera ?? 0) / 10000);
+        this.bars.energy.update((p.energiaActual ?? 0) / eMax);
+        hasEnergy = (p.energiaActual ?? 0) > (eMax * 0.1);
+        canAfford = (p.cartera ?? 0) > 50;
+      }
+    }
+
+    // --- 2. Actualización de HUD Fijo y Efecto de Pulso en Día ---
+    if (this.dayText) {
+        const currentDayText = `Día: ${dayN}`;
+        if (this.dayText.text !== currentDayText) {
+             // CINEMÁTICA: Pulso al cambiar el día
+             this.tweens.add({
+                targets: [this.dayText, this.clockText],
+                scale: 1.05,
+                duration: 150,
+                yoyo: true,
+                repeat: 0, 
+                ease: 'Sine.easeInOut'
+             });
+        }
+        this.dayText.setText(currentDayText);
+    }
+    
+    // Actualización de HUD fijo
+    if (this.clockText) {
+        this.clockText.setText(
+            `${L.name} — Día ${dayN}/${TimeState.levelDays} — ` +
+            `${getSimDate().getFullYear()}-${String(getSimDate().getMonth()+1).padStart(2,'0')}-${String(getSimDate().getDate()).padStart(2,'0')}`
+        );
+    }
+    if (this.fpsText) this.fpsText.setText('FPS: ' + Math.floor(this.game.loop.actualFps || 0));
+    if (this.moneyText) this.moneyText.setText(`₲ ${player ? player.cartera.toFixed(0) : 0}`);
+    if (player && window.__CV_START__?.profile?.name && this.playerNameText) {
+      this.playerNameText.setText(window.__CV_START__.profile.name);
+    }
+
+
+    // --- 3. Efecto: Alerta de Barra Crítica (Estrés por Calor) ---
+    const CRITICAL_HEAT_THRESHOLD = 0.70; 
+    const highHeatStress = (heatValue >= CRITICAL_HEAT_THRESHOLD);
+    
+    if (this.heatAlertTween) {
+        if (highHeatStress) {
+            if (this.heatAlertTween.paused) {
+                this.heatAlertTween.play();
             }
-        });
-        
-        // --- 3. Actualización de Textos ---
-        this.dayText.setText(`Día: ${getSimDayNumber()}`);
-        const player = findFirstPlayer();
-        if(player && window.__CV_START__?.profile?.name) {
-             // Asume que el nombre real se guarda al iniciar
-            this.playerNameText.setText(window.__CV_START__.profile.name); 
+        } else {
+            if (this.heatAlertTween.isPlaying()) {
+                this.heatAlertTween.pause();
+                // Restaura el estado visual de la barra
+                this.bars.heat.bg.setAlpha(1).fillColor = 0x000000; 
+            }
         }
     }
+
+    // --- 4. Desactivación dinámica de botones y Destello al Desbloquear ---
+    this.actionButtons.forEach(button => {
+      if (!button || !button.bg) return;
+      const bg = button.bg;
+
+      const previouslyEnabled = bg.input && bg.input.enabled;
+      const isEnabled = hasEnergy && canAfford;
+
+      bg.setAlpha(isEnabled ? 1 : 0.55);
+
+      if (isEnabled) {
+        if (!previouslyEnabled) {
+          // EFECTO AÑADIDO: Destello al Desbloquear Botón (feedback positivo)
+          this.tweens.add({ 
+            targets: [bg, button.text], 
+            scale: 1.02, 
+            duration: 100, 
+            yoyo: true, 
+            repeat: 0, 
+            ease: 'Quad.easeOut' 
+          });
+          bg.setInteractive({ useHandCursor: true });
+          bg.fillColor = this.colors.actionButton;
+        }
+      } else {
+        if (previouslyEnabled) {
+          // Bloqueo
+          bg.disableInteractive();
+          bg.fillColor = this.colors.actionButtonDisabled;
+        }
+      }
+    });
+
+
+    // --- 5. Alertas (últimas 5) ---
+    const alerts = repoAll('alertas').filter(a => a.visible !== false).slice(-5);
+    const atext = alerts.length ? alerts.map(a => `• ${a.mensaje}`).join('\n') : 'No hay alertas activas.';
+    this.alertsText.setText(atext);
+  }
 }
