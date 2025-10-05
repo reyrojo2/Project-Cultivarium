@@ -20,7 +20,7 @@ const config = {
   backgroundColor: '#0f172a',
   dom: { createContainer: true },
   scale: {
-    mode: Phaser.Scale.FIT,
+    mode: Phaser.Scale.RESIZE, 
     autoCenter: Phaser.Scale.CENTER_BOTH,
     width: GAME.WIDTH,
     height: GAME.HEIGHT,
