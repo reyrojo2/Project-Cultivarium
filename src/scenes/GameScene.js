@@ -8,7 +8,7 @@ import { tickCrops } from '../systems/cropSystem.js';
 import { tickPlagues } from '../systems/plagueSystem.js';
 import { tickAlerts } from '../systems/alertSystem.js';
 import { findFirstPlayer, spend } from '../core/state.js';
-import { startLevel, tickSim, getSimDayProgress01 } from '../core/time.js';
+import { startLevel, tickSim, getSimDayProgress01, getSimDayNumber } from '../core/time.js';
 import { T, MAP_PRESETS, makePlayableMatrix, makeWorldMatrix, buildBlockIndex, buildFromPreset } from '../map/mapBuilder.js';
 import { DECOR, addDecor } from '../map/decor.js';
 
@@ -222,6 +222,7 @@ export default class GameScene extends Phaser.Scene {
     this._cooldowns = { water: 0, plow: 0, harvest: 0, plant: 0 };
     this.decorEntries = [];      // ← entradas {sprite, shadow, def} de addDecor()
     this.timeOfDay = 0.5;          // 0..1 (se sincroniza con la simulación al iniciar)
+    this.currentSimDay = 1;
   }
 
   create() {
@@ -230,6 +231,7 @@ export default class GameScene extends Phaser.Scene {
 
     startLevel(0);
     this.timeOfDay = getSimDayProgress01();
+    this.currentSimDay = getSimDayNumber();
     if (this.input?.setTopOnly) this.input.setTopOnly(true);
     Factory.createPlayer({ name: 'AgroPro', cartera: 200 });
     Factory.createTienda();
@@ -553,6 +555,8 @@ export default class GameScene extends Phaser.Scene {
       this.game.events.off('action:perform', this._onUIAction);
     });
 
+    tickClimate({ dayIndex: this.currentSimDay - 1 }).catch(err => console.error('tickClimate init', err));
+
     if (!this.scene.isActive('UI')) this.scene.launch('UI');
   }
 
@@ -762,19 +766,23 @@ export default class GameScene extends Phaser.Scene {
     }
 
     // 2) Avanza la simulación temporal antes de derivar efectos visuales
+    const prevSimDay = this.currentSimDay ?? getSimDayNumber();
     State.clock += 1;
     tickSim(delta);
 
-    // 3) Día/tarde/noche + sombras basados en TimeState
-    this.tickDayNight();
+    const newSimDay = getSimDayNumber();
+    if (newSimDay !== prevSimDay) {
+      this.currentSimDay = newSimDay;
+      tickClimate({ dayIndex: newSimDay - 1 }).catch(err => console.error('tickClimate day change', err));
+    }
 
-    // 4) Cooldowns
+    // 3) Cooldowns
     const dec = delta;
     for (const k in this._cooldowns) {
       this._cooldowns[k] = Math.max(0, (this._cooldowns[k] || 0) - dec);
     }
 
-    // 5) Cámara (wasd/flechas)
+    // 4) Cámara (wasd/flechas)
     const cam = this.cameras.main;
     const dt = delta / 1000;
     const v = this.camSpeed / cam.zoom;
@@ -783,17 +791,17 @@ export default class GameScene extends Phaser.Scene {
     if (this.cursors?.up.isDown)    cam.scrollY -= v * dt;
     if (this.cursors?.down.isDown)  cam.scrollY += v * dt;
 
-    // 6) Atajos
+    // 5) Atajos
     if (Phaser.Input.Keyboard.JustDown(this.keyA)) this.plowSelected();
     if (Phaser.Input.Keyboard.JustDown(this.keyW)) this.waterSelected();
     if (Phaser.Input.Keyboard.JustDown(this.keyD)) this.harvestSelected();
     if (Phaser.Input.Keyboard.JustDown(this.keyS)) this.sellHarvest();
     if (Phaser.Input.Keyboard.JustDown(this.keyX)) this.openTechTree();
 
-    // 7) Simulación
-    tickClimate(); tickCrops(); tickPlagues(); tickAlerts();
+    // 6) Simulación
+    tickCrops(); tickPlagues(); tickAlerts();
 
-    // 8) Secado periódico
+    // 7) Secado periódico
     if ((State.clock % 15) === 0) {
       for (const p of repoAll('parcelas')) {
         if (p.wetUntil && State.clock >= p.wetUntil) {
