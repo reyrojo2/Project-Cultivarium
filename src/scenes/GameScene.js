@@ -248,7 +248,9 @@ export default class GameScene extends Phaser.Scene {
     tickClimate({ regionCode: State.region?.codigo, dayIndex: initialIdx })
       .catch(err => console.error('climate:init', err));
     if (this.input?.setTopOnly) this.input.setTopOnly(true);
-    Factory.createPlayer({ name: 'AgroPro', cartera: 200 });
+    // Creamos al jugador con un colchón inicial de dinero suficiente para regar y
+    // sembrar sin trabarse durante los primeros días de simulación.
+    Factory.createPlayer({ name: 'AgroPro', cartera: 1000 });
     Factory.createTienda();
 
     // ==== Texturas ====
@@ -339,7 +341,9 @@ export default class GameScene extends Phaser.Scene {
       const worldX0 = grassBorder + b.x0;
       const worldY0 = grassBorder + b.y0;
 
-      const recAgua = Factory.createRecurso({ tipo:'AGUA', nivel:0.0 });
+      // Cada parcela arranca con un recurso de agua en nivel medio para evitar
+      // que el cultivo se seque inmediatamente tras iniciar la partida.
+      const recAgua = Factory.createRecurso({ tipo:'AGUA', nivel:0.6 });
       const parcela = Factory.createParcela({
         x: worldX0, y: worldY0, w: parcelaSize, h: parcelaSize,
         recursos: [recAgua.id], cultivoId: null, saludSuelo: 0.8, arada: false
@@ -815,11 +819,39 @@ export default class GameScene extends Phaser.Scene {
     const p = repoGet('parcelas', this.selectedParcelaId);
     if (!p) return;
 
-    if (p.arada) {
+    // Revisamos si hay un cultivo muerto para permitir "limpiar" la parcela.
+    const cultivo = p.cultivoId ? repoGet('cultivos', p.cultivoId) : null;
+    const cultivoMuerto = cultivo && (cultivo.etapa === 'MUERTO' || (cultivo.saludActual ?? 0) <= 0);
+
+    if (p.arada && !cultivoMuerto && !p.cultivoId) {
       this.game.events.emit('toast',{type:'info', msg: t('game.toasts.parcelAlreadyPlowed', { parcel: p.id })});
       return;
     }
+
+    // Si hay un cultivo muerto lo eliminamos junto con sus indicadores visuales.
+    if (cultivoMuerto) {
+      State.repos.cultivos.delete(cultivo.id);
+      this.parcelaIdByCultivoId.delete(cultivo.id);
+      this.clearCultivoSprite(p.id);
+      p.cultivoId = null;
+    }
+
+    // También limpiamos los tooltips/alertas asociados a la parcela arada.
+    repoAll('alertas').forEach((alerta) => {
+      if (alerta.parcelaId === p.id) alerta.visible = false;
+    });
+
+    // Reestablecemos banderas base para que la parcela quede lista para sembrar.
     p.arada = true;
+    p.plagaActiva = false;
+    p.intensidadPlaga = 0;
+
+    const agua = (p.recursos || [])
+      .map((rid) => repoGet('recursos', rid))
+      .find((r) => r && r.tipo === 'AGUA');
+    // Dejamos la humedad del suelo con un mínimo saludable para imitar tierra recién labrada.
+    if (agua) agua.nivel = Math.max(agua.nivel ?? 0, 0.6);
+
     applyBlockVisual(this, p.id);
     this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.plowSuccess', { parcel: p.id }) });
 
