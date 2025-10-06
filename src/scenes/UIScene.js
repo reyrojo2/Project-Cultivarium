@@ -492,14 +492,33 @@ populateActionPanel(panel, colors) {
     };
 
     // Click
+    // Guardamos si el puntero se presionó dentro del botón para luego validar el
+    // pointerup, evitando disparos accidentales cuando el usuario arrastra hacia
+    // fuera del botón antes de soltar.
+    let pointerPressedInside = false;
+
     bg.on('pointerdown', () => {
       if (bg.input?.enabled) {
+        pointerPressedInside = true;
         this.tweens.add({ targets: [bg, labelText], scale: 0.96, duration: 80, yoyo: true, ease: 'Quad.easeInOut' });
-        onClick();
       } else {
         this.tweens.add({ targets: bg, x: bg.x + 5, duration: 50, yoyo: true, repeat: 1, ease: 'Sine.easeInOut' });
       }
     });
+
+    // Ejecutamos la acción en pointerup para que los menús emergentes no se
+    // cierren inmediatamente al soltar el botón (el evento pointerup ya ocurrió
+    // cuando el overlay se crea).
+    const invoke = () => {
+      if (!pointerPressedInside) return;
+      pointerPressedInside = false;
+      if (bg.input?.enabled) {
+        onClick();
+      }
+    };
+
+    bg.on('pointerup', invoke);
+    bg.on('pointerupoutside', () => { pointerPressedInside = false; });
 
     bg.on('pointerover', () => { if (bg.input?.enabled) bg.fillColor = colors.actionButtonHover; });
     bg.on('pointerout',  () => { if (bg.input?.enabled) bg.fillColor = colors.actionButton; });

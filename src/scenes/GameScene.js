@@ -694,6 +694,9 @@ export default class GameScene extends Phaser.Scene {
     }
 
     const metrics = this.getCultivoSpriteMetrics();
+    // Reducimos ligeramente la semilla de maíz para que destaque como punto de
+    // siembra sin cubrir todo el tile.
+    const isSeedPhase = spritePhase === SPRITE_PHASES.MAIZ_SEMILLA;
     const tiles = this.spritesByBlockId.get(blockId) || [];
     const overlays = [];
 
@@ -703,7 +706,7 @@ export default class GameScene extends Phaser.Scene {
       tiles.forEach((tile) => {
         if (!tile?.active) return;
         const text = this.add.text(tile.x, tile.y - metrics.yOffset, emoji, {
-          fontSize: `${metrics.fontSize}px`,
+          fontSize: `${Math.round(metrics.fontSize * (isSeedPhase ? 0.72 : 1))}px`,
           fontFamily: 'Noto Color Emoji, "Segoe UI Emoji", system-ui, sans-serif',
           align: 'center'
         }).setOrigin(0.5);
@@ -720,7 +723,7 @@ export default class GameScene extends Phaser.Scene {
       if (!pos) return;
 
       const text = this.add.text(pos.x, pos.y - metrics.yOffset, emoji, {
-        fontSize: `${metrics.fontSize}px`,
+        fontSize: `${Math.round(metrics.fontSize * (isSeedPhase ? 0.72 : 1))}px`,
         fontFamily: 'Noto Color Emoji, "Segoe UI Emoji", system-ui, sans-serif',
         align: 'center'
       }).setOrigin(0.5);
@@ -1083,37 +1086,51 @@ export default class GameScene extends Phaser.Scene {
     // jugador elige el cultivo a sembrar.
     const backdropWidth = view ? view.width * 1.4 : cam.width / cam.zoom;
     const backdropHeight = view ? view.height * 1.4 : cam.height / cam.zoom;
-    const backdrop = this.add.rectangle(0, 0, backdropWidth, backdropHeight, 0x0f172a, 0.45)
+    const backdrop = this.add.rectangle(0, 0, backdropWidth, backdropHeight, 0x0f172a, 0.52)
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: false });
+
+    // Retrasamos levemente la interacción para que el pointerup que disparó la
+    // apertura del menú no lo cierre inmediatamente.
+    backdrop.disableInteractive();
+    this.time.delayedCall(160, () => {
+      if (!backdrop.scene || !backdrop.active) return;
+      backdrop.setInteractive({ useHandCursor: false });
+    });
+
     backdrop.on('pointerup', () => this.closeSeedMenu());
     container.add(backdrop);
 
     const cropKeys = Object.keys(CROP_CONFIG);
     const buttonCount = cropKeys.length;
-    const panelWidth = Math.min(600, (view ? view.width : cam.width) * 0.75);
-    const buttonHeight = 86;
-    const buttonSpacing = 16;
-    const panelHeight = Math.max(280, buttonCount * (buttonHeight + buttonSpacing) + 180);
+    // Panel ancho y responsivo para que el selector sea legible incluso en
+    // pantallas grandes. Mantiene márgenes en pantallas pequeñas y se limita
+    // entre ~420px y 920px.
+    const baseWidth = view ? view.width : cam.width;
+    const minWidth = Math.max(420, Math.min(560, baseWidth * 0.92));
+    const panelWidth = Phaser.Math.Clamp(baseWidth * 0.7, minWidth, 920);
+    const buttonHeight = 108;
+    const buttonSpacing = 22;
+    const panelHeight = Math.max(340, buttonCount * (buttonHeight + buttonSpacing) + 220);
 
     const panel = this.add.rectangle(0, 0, panelWidth, panelHeight, 0x1e293b, 0.94)
       .setOrigin(0.5);
-    panel.setStrokeStyle(6, 0xfacc15, 0.9);
+    panel.setStrokeStyle(8, 0xfacc15, 0.95);
     panel.setInteractive(new Phaser.Geom.Rectangle(-panelWidth / 2, -panelHeight / 2, panelWidth, panelHeight), Phaser.Geom.Rectangle.Contains);
     container.add(panel);
 
-    const title = this.add.text(0, -panelHeight / 2 + 48, t('game.seedMenu.title'), {
+    const title = this.add.text(0, -panelHeight / 2 + 64, t('game.seedMenu.title'), {
       fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-      fontSize: '32px',
+      fontSize: `${Math.round(panelWidth * 0.05)}px`,
       fontStyle: '700',
       color: '#f8fafc',
       align: 'center'
     }).setOrigin(0.5, 0);
     container.add(title);
 
-    const subtitle = this.add.text(0, title.y + 42, t('game.seedMenu.subtitle'), {
+    const subtitle = this.add.text(0, title.y + 56, t('game.seedMenu.subtitle'), {
       fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-      fontSize: '18px',
+      fontSize: `${Math.round(panelWidth * 0.028)}px`,
       color: '#cbd5f5',
       align: 'center',
       wordWrap: { width: panelWidth - 80 }
@@ -1121,7 +1138,7 @@ export default class GameScene extends Phaser.Scene {
     container.add(subtitle);
 
     const metrics = { panelWidth, buttonHeight, buttonSpacing };
-    const listTop = subtitle.y + 88;
+    const listTop = subtitle.y + 104;
 
     const localizeCropName = (key, fallback) => {
       const translationKey = `game.crops.${key}`;
@@ -1132,7 +1149,7 @@ export default class GameScene extends Phaser.Scene {
     cropKeys.forEach((cropKey, idx) => {
       const cfg = CROP_CONFIG[cropKey];
       const y = listTop + idx * (metrics.buttonHeight + metrics.buttonSpacing);
-      const optionWidth = panelWidth - 96;
+      const optionWidth = panelWidth - 120;
 
       const optionBg = this.add.rectangle(0, y, optionWidth, metrics.buttonHeight, 0x334155, 0.92)
         .setOrigin(0.5)
@@ -1152,7 +1169,7 @@ export default class GameScene extends Phaser.Scene {
         cost: cfg?.costoSemilla ?? 0
       }), {
         fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-        fontSize: '24px',
+        fontSize: `${Math.round(panelWidth * 0.036)}px`,
         color: '#f8fafc',
         fontStyle: '600',
         align: 'center'
@@ -1162,8 +1179,8 @@ export default class GameScene extends Phaser.Scene {
       container.add(optionText);
     });
 
-    const cancelY = panelHeight / 2 - 70;
-    const cancelBg = this.add.rectangle(0, cancelY, panelWidth - 220, 68, 0x64748b, 0.88)
+    const cancelY = panelHeight / 2 - 86;
+    const cancelBg = this.add.rectangle(0, cancelY, panelWidth - 240, 78, 0x64748b, 0.88)
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
     cancelBg.on('pointerover', () => cancelBg.setFillStyle(0x94a3b8, 0.92));
@@ -1172,7 +1189,7 @@ export default class GameScene extends Phaser.Scene {
 
     const cancelText = this.add.text(0, cancelY, t('game.seedMenu.cancel'), {
       fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-      fontSize: '22px',
+      fontSize: `${Math.round(panelWidth * 0.034)}px`,
       fontStyle: '600',
       color: '#0f172a'
     }).setOrigin(0.5);
