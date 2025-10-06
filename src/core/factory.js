@@ -76,13 +76,15 @@ export const Factory = {
     const e = {
       id: newId('cultivo'),
       tipo: overrides.tipo || 'MAIZ',
-      etapa: 'SIEMBRA',        // SIEMBRA->CRECIMIENTO->COSECHA
-      progreso: 0,             // 0..1
-      consumoAgua: 0.5,        // por tick (escala relativa)
-      sensibilidadClima: {     // multiplicadores por tipo de clima
+      etapa: overrides.etapa || 'SEMILLA',
+      progreso: overrides.progreso ?? 0,
+      consumoAgua: overrides.consumoAgua ?? 1.0,
+      resistenciaPlagas: overrides.resistenciaPlagas ?? 0,
+      saludActual: overrides.saludActual ?? 1.0,
+      sensibilidadClima: overrides.sensibilidadClima || {
         FRIO: 0.8, CALOR: 1.2, SEQUIA: 0.5, LLUVIA: 1.1
       },
-      plagas: [],              // ids de plagas presentes
+      plagas: overrides.plagas || [],
       ...overrides
     };
     repoSet('cultivos', e);
