@@ -40,7 +40,12 @@
                 "crop": "Cultivo: {{type}} ({{stage}} {{progress}}%)",
                 "cropNone": "Cultivo: -",
                 "water": "Agua: {{value}}",
-                "waterNone": "Agua: -"
+                "waterNone": "Agua: -",
+                "pest": "Plaga: {{status}}",
+                "pestActive": "ACTIVA",
+                "pestInactive": "No",
+                "risk": "Riesgo: {{value}}%",
+                "intensity": "Intensidad: {{value}}"
             },
             "alertsTitle": "\u26a0\ufe0f Alertas del Sistema",
             "alertsEmpty": "No hay alertas activas.",
@@ -48,8 +53,8 @@
             "barLabels": {
                 "health": "SALUD (NDVI)",
                 "heat": "CALOR (Estr\u00e9s)",
-                "water": "HUMEDAD (SMAP RZSM)",
-                "humidity": "LLUVIA (GPM)",
+                "humidity": "HUMEDAD RELATIVA (%)",
+                "rain": "LLUVIA (GPM)",
                 "money": "DINERO ($)",
                 "energy": "ENERG\u00cdA (\u26a1)"
             },
@@ -81,7 +86,8 @@
                 "sell": {
                     "label": "\ud83d\udcb0 Vender Cosecha",
                     "feedback": "\ud83d\udcb0 Mercado actualizado"
-                }
+                },
+                "blocked": "\ud83d\udeab \u00a1Acci\u00f3n bloqueada! Falta energ\u00eda o dinero."
             }
         },
         "game": {
@@ -152,7 +158,12 @@
                 "crop": "Crop: {{type}} ({{stage}} {{progress}}%)",
                 "cropNone": "Crop: -",
                 "water": "Water: {{value}}",
-                "waterNone": "Water: -"
+                "waterNone": "Water: -",
+                "pest": "Pest: {{status}}",
+                "pestActive": "ACTIVE",
+                "pestInactive": "No",
+                "risk": "Risk: {{value}}%",
+                "intensity": "Intensity: {{value}}"
             },
             "alertsTitle": "\u26a0\ufe0f System Alerts",
             "alertsEmpty": "No active alerts.",
@@ -160,8 +171,8 @@
             "barLabels": {
                 "health": "HEALTH (NDVI)",
                 "heat": "HEAT (Stress)",
-                "water": "SOIL MOISTURE (SMAP RZSM)",
-                "humidity": "RAINFALL (GPM)",
+                "humidity": "RELATIVE HUMIDITY (%)",
+                "rain": "RAINFALL (GPM)",
                 "money": "MONEY ($)",
                 "energy": "ENERGY (\u26a1)"
             },
@@ -193,7 +204,8 @@
                 "sell": {
                     "label": "\ud83d\udcb0 Sell Harvest",
                     "feedback": "\ud83d\udcb0 Market updated"
-                }
+                },
+                "blocked": "\ud83d\udeab Action blocked! Not enough energy or funds."
             }
         },
         "game": {
