@@ -164,7 +164,7 @@
                 "health": "HEALTH (NDVI)",
                 "heat": "HEAT (Stress)",
                 "water": "SOIL MOISTURE (SMAP RZSM)",
-                "humidity": "RAINFALL (GPM)",
+                "humidity": "HUMIDITY (GPM)",
                 "money": "MONEY ($)",
                 "energy": "ENERGY (\u26a1)",
                 "rain": "RAIN"
