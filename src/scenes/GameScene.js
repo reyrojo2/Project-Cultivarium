@@ -1103,15 +1103,17 @@ export default class GameScene extends Phaser.Scene {
 
     const cropKeys = Object.keys(CROP_CONFIG);
     const buttonCount = cropKeys.length;
-    // Panel ancho y responsivo para que el selector sea legible incluso en
-    // pantallas grandes. Mantiene márgenes en pantallas pequeñas y se limita
-    // entre ~420px y 920px.
+    // Escalamos todos los elementos del menú para duplicar su presencia visual
+    // respetando el ancho disponible del viewport actual. El factor boost se
+    // aplica a dimensiones y márgenes clave para mantener proporciones.
+    const boost = 2;
     const baseWidth = view ? view.width : cam.width;
-    const minWidth = Math.max(420, Math.min(560, baseWidth * 0.92));
-    const panelWidth = Phaser.Math.Clamp(baseWidth * 0.7, minWidth, 920);
-    const buttonHeight = 108;
-    const buttonSpacing = 22;
-    const panelHeight = Math.max(340, buttonCount * (buttonHeight + buttonSpacing) + 220);
+    const unclampedWidth = Phaser.Math.Clamp(baseWidth * 0.7, 420, 920);
+    const viewportCap = Math.max(720, baseWidth - 120);
+    const panelWidth = Phaser.Math.Clamp(unclampedWidth * boost, 640, viewportCap);
+    const buttonHeight = 108 * boost;
+    const buttonSpacing = 22 * boost;
+    const panelHeight = Math.max(340 * boost, buttonCount * (buttonHeight + buttonSpacing) + 220 * boost);
 
     const panel = this.add.rectangle(0, 0, panelWidth, panelHeight, 0x1e293b, 0.94)
       .setOrigin(0.5);
@@ -1119,7 +1121,7 @@ export default class GameScene extends Phaser.Scene {
     panel.setInteractive(new Phaser.Geom.Rectangle(-panelWidth / 2, -panelHeight / 2, panelWidth, panelHeight), Phaser.Geom.Rectangle.Contains);
     container.add(panel);
 
-    const title = this.add.text(0, -panelHeight / 2 + 64, t('game.seedMenu.title'), {
+    const title = this.add.text(0, -panelHeight / 2 + 64 * boost, t('game.seedMenu.title'), {
       fontFamily: 'ui-sans-serif, system-ui, sans-serif',
       fontSize: `${Math.round(panelWidth * 0.05)}px`,
       fontStyle: '700',
@@ -1128,17 +1130,17 @@ export default class GameScene extends Phaser.Scene {
     }).setOrigin(0.5, 0);
     container.add(title);
 
-    const subtitle = this.add.text(0, title.y + 56, t('game.seedMenu.subtitle'), {
+    const subtitle = this.add.text(0, title.y + 56 * boost, t('game.seedMenu.subtitle'), {
       fontFamily: 'ui-sans-serif, system-ui, sans-serif',
       fontSize: `${Math.round(panelWidth * 0.028)}px`,
       color: '#cbd5f5',
       align: 'center',
-      wordWrap: { width: panelWidth - 80 }
+      wordWrap: { width: panelWidth - 80 * boost }
     }).setOrigin(0.5, 0);
     container.add(subtitle);
 
     const metrics = { panelWidth, buttonHeight, buttonSpacing };
-    const listTop = subtitle.y + 104;
+    const listTop = subtitle.y + 104 * boost;
 
     const localizeCropName = (key, fallback) => {
       const translationKey = `game.crops.${key}`;
@@ -1149,7 +1151,7 @@ export default class GameScene extends Phaser.Scene {
     cropKeys.forEach((cropKey, idx) => {
       const cfg = CROP_CONFIG[cropKey];
       const y = listTop + idx * (metrics.buttonHeight + metrics.buttonSpacing);
-      const optionWidth = panelWidth - 120;
+      const optionWidth = panelWidth - 120 * boost;
 
       const optionBg = this.add.rectangle(0, y, optionWidth, metrics.buttonHeight, 0x334155, 0.92)
         .setOrigin(0.5)
@@ -1179,8 +1181,8 @@ export default class GameScene extends Phaser.Scene {
       container.add(optionText);
     });
 
-    const cancelY = panelHeight / 2 - 86;
-    const cancelBg = this.add.rectangle(0, cancelY, panelWidth - 240, 78, 0x64748b, 0.88)
+    const cancelY = panelHeight / 2 - 86 * boost;
+    const cancelBg = this.add.rectangle(0, cancelY, panelWidth - 240 * boost, 78 * boost, 0x64748b, 0.88)
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
     cancelBg.on('pointerover', () => cancelBg.setFillStyle(0x94a3b8, 0.92));
