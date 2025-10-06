@@ -12,6 +12,14 @@ import { TimeState, MINUTES_PER_SIM_DAY } from '../core/time.js';
 
 const CROP_ALERT_CODE = 'CROP_DEAD';
 
+// Identificadores para fases visuales específicas que controlan qué ícono se
+// dibuja sobre la parcela. Separarlos de las etapas lógicas nos deja cambiar el
+// aspecto según el progreso (por ejemplo, semillas de maíz germinando).
+export const SPRITE_PHASES = {
+  MAIZ_SEMILLA: 'MAIZ_SEMILLA',
+  MAIZ_BROTE: 'MAIZ_BROTE'
+};
+
 // Administra la alerta persistente que marca cuando un cultivo muere en una parcela
 function ensureCropAlert(parcelaId, message) {
   if (!parcelaId) return;
@@ -146,6 +154,45 @@ function notifyCropStageChange(cultivo) {
   }
 }
 
+/**
+ * Calcula la fase visual que debe representarse para un cultivo específico.
+ * Permite mostrar íconos especiales antes de que cambie la etapa lógica, como
+ * una semilla que recién empieza a germinar.
+ */
+export function resolveSpritePhase(cultivo) {
+  if (!cultivo) return 'SEMILLA';
+
+  const etapa = cultivo.etapa || 'SEMILLA';
+  const progreso = Number.isFinite(cultivo.progreso) ? cultivo.progreso : 0;
+
+  if (etapa === 'MUERTO') return 'MUERTO';
+
+  if (cultivo.tipo === 'MAIZ') {
+    if (progreso <= 0.05) {
+      return SPRITE_PHASES.MAIZ_SEMILLA;
+    }
+
+    if (etapa === 'SEMILLA' && progreso > 0.05) {
+      return SPRITE_PHASES.MAIZ_BROTE;
+    }
+  }
+
+  return etapa;
+}
+
+function syncSpritePhase(cultivo, stageChanged = false) {
+  const nextPhase = resolveSpritePhase(cultivo);
+  const spriteChanged = cultivo.__spritePhase !== nextPhase;
+
+  if (spriteChanged) {
+    cultivo.__spritePhase = nextPhase;
+  }
+
+  if (stageChanged || spriteChanged) {
+    notifyCropStageChange(cultivo);
+  }
+}
+
 export function tickCrops() {
   const deltaDays = computeDeltaSimDays();
   if (deltaDays <= 0) return;
@@ -161,10 +208,11 @@ export function tickCrops() {
     cultivo.saludActual = Math.min(Math.max(cultivo.saludActual, 0), 1);
 
     if (cultivo.saludActual <= 0) {
-      if (cultivo.etapa !== 'MUERTO') {
+      const stageChanged = cultivo.etapa !== 'MUERTO';
+      if (stageChanged) {
         cultivo.etapa = 'MUERTO';
-        notifyCropStageChange(cultivo);
       }
+      syncSpritePhase(cultivo, stageChanged);
       ensureCropAlert(p.id, t('ui.alerts.cropDied', { parcel: p.id }));
       continue;
     }
@@ -175,10 +223,12 @@ export function tickCrops() {
     const recAguaId = p.recursos.find(rid => State.repos.recursos.get(rid)?.tipo === 'AGUA');
     if (!recAguaId) {
       cultivo.saludActual = Math.max(0, cultivo.saludActual - (HEALTH_DECAY_PER_DAY * deltaDays));
+      let stageChanged = false;
       if (cultivo.saludActual <= 0 && cultivo.etapa !== 'MUERTO') {
         cultivo.etapa = 'MUERTO';
-        notifyCropStageChange(cultivo);
+        stageChanged = true;
       }
+      syncSpritePhase(cultivo, stageChanged);
       if (cultivo.saludActual <= 0) {
         ensureCropAlert(p.id, t('ui.alerts.cropDied', { parcel: p.id }));
       }
@@ -208,23 +258,30 @@ export function tickCrops() {
 
       const etapaAnterior = cultivo.etapa;
       updateCropStage(cultivo, config);
-      if (cultivo.etapa !== etapaAnterior) {
-        notifyCropStageChange(cultivo);
-      }
+      const stageChanged = cultivo.etapa !== etapaAnterior;
+      syncSpritePhase(cultivo, stageChanged);
     } else if (recursoAgua.nivel < WATER_THRESHOLD_DECAY) {
       cultivo.saludActual = Math.max(0, cultivo.saludActual - (HEALTH_DECAY_PER_DAY * deltaDays));
+      let stageChanged = false;
       if (cultivo.saludActual <= 0 && cultivo.etapa !== 'MUERTO') {
         cultivo.etapa = 'MUERTO';
-        notifyCropStageChange(cultivo);
+        stageChanged = true;
       }
+      syncSpritePhase(cultivo, stageChanged);
       if (cultivo.saludActual <= 0) {
         ensureCropAlert(p.id, t('ui.alerts.cropDied', { parcel: p.id }));
+      } else {
+        ensureCropAlert(p.id, t('ui.alerts.lowWater', { parcel: p.id }));
       }
     }
 
     if (cultivo.saludActual > 0 && cultivo.etapa !== 'MUERTO') {
       ensureCropAlert(p.id, null);
     }
+
+    // Asegura que cultivos hidratados mantengan sincronizado su ícono aunque
+    // no haya cambio de etapa (por ejemplo, crecimiento inicial del maíz).
+    syncSpritePhase(cultivo, false);
   }
 }
 

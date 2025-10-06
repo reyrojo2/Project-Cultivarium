@@ -6,7 +6,7 @@ import { Factory } from '../core/factory.js';
 import { EVENTOS_TIPO, NIVELES } from '../data/enums.js';
 import { tickClimate } from '../systems/climateSystem.js';
 import { getSimDayNumber } from '../core/time.js';
-import { tickCrops, CROP_CONFIG, isCultivoListo } from '../systems/cropSystem.js';
+import { tickCrops, CROP_CONFIG, isCultivoListo, resolveSpritePhase, SPRITE_PHASES } from '../systems/cropSystem.js';
 import { tickPlagues } from '../systems/plagueSystem.js';
 import { tickAlerts } from '../systems/alertSystem.js';
 import { findFirstPlayer, spend } from '../core/state.js';
@@ -369,7 +369,10 @@ export default class GameScene extends Phaser.Scene {
       if (!parcela.cultivoId) continue;
       this.parcelaIdByCultivoId.set(parcela.cultivoId, parcela.id);
       const cultivo = repoGet('cultivos', parcela.cultivoId);
-      if (cultivo) this.showCultivoSprite(parcela.id, cultivo.tipo, cultivo.etapa);
+      if (cultivo) {
+        cultivo.__spritePhase = resolveSpritePhase(cultivo);
+        this.showCultivoSprite(parcela.id, cultivo.tipo, cultivo.etapa, cultivo.progreso ?? 0);
+      }
     }
 
     this.decorEntries = [];
@@ -620,15 +623,21 @@ export default class GameScene extends Phaser.Scene {
     g.fillStyle(0x60a5fa, 0.06).fillPoints(pts, true);
   }
 
-  showCultivoSprite(parcelaId, tipoCultivo, etapa) {
+  showCultivoSprite(parcelaId, tipoCultivo, etapa, progreso = 0) {
     const blockId = this.blockIdByParcelaId.get(parcelaId);
     if (!blockId) return;
 
     const existing = this.cultivoSprites.get(parcelaId);
     if (existing) existing.destroy();
 
+    // Determina la fase visual tomando en cuenta progreso y etapa para desplegar
+    // íconos especiales (ej: semilla de maíz recién sembrada vs. brote).
+    const spritePhase = resolveSpritePhase({ tipo: tipoCultivo, etapa, progreso });
+
     let emoji = '🌱';
-    switch (etapa) {
+    switch (spritePhase) {
+      case SPRITE_PHASES.MAIZ_SEMILLA: emoji = '🟠'; break;
+      case SPRITE_PHASES.MAIZ_BROTE: emoji = '🌱'; break;
       case 'BROTE': emoji = '🌿'; break;
       case 'CRECIMIENTO': emoji = '🌾'; break;
       case 'MADURO': emoji = '🌻'; break;
@@ -810,7 +819,8 @@ export default class GameScene extends Phaser.Scene {
     }
 
     if (!parcelaId) return;
-    this.showCultivoSprite(parcelaId, cultivo.tipo, cultivo.etapa);
+    cultivo.__spritePhase = resolveSpritePhase(cultivo);
+    this.showCultivoSprite(parcelaId, cultivo.tipo, cultivo.etapa, cultivo.progreso ?? 0);
   }
 
   // === Acciones aplicadas al BLOQUE seleccionado ===
@@ -1006,10 +1016,14 @@ export default class GameScene extends Phaser.Scene {
       saludActual: 1.0
     });
 
+    // Almacenamos la fase inicial para que el sistema de cultivos pueda detectar
+    // transiciones visuales (ej. pasar de semilla de maíz a brote).
+    cultivo.__spritePhase = resolveSpritePhase(cultivo);
+
     p.cultivoId = cultivo.id;
     this.parcelaIdByCultivoId.set(cultivo.id, p.id);
 
-    this.showCultivoSprite(p.id, tipoCultivo, cultivo.etapa);
+    this.showCultivoSprite(p.id, tipoCultivo, cultivo.etapa, cultivo.progreso ?? 0);
 
     this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.plantSuccess', { crop: config.nombre, parcel: p.id }) });
 
