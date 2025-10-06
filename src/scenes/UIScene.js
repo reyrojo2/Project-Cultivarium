@@ -1,6 +1,15 @@
 import Phaser from 'phaser';
 import { State, repoAll, findFirstPlayer, repoGet } from '../core/state.js';
 import { TimeState, getSimDate, getSimDayNumber, LEVELS } from '../core/time.js';
+import { getLanguage, setLanguage, translate as t } from '../utils/i18n.js';
+
+const formatDate = (date) => {
+  if (!(date instanceof Date)) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 export default class UIScene extends Phaser.Scene {
   constructor() {
@@ -20,6 +29,8 @@ export default class UIScene extends Phaser.Scene {
   }
 
   create() {
+    setLanguage(window.__CV_START__?.language || getLanguage());
+
     const screenW = this.scale.width;
     const screenH = this.scale.height;
 
@@ -63,9 +74,18 @@ export default class UIScene extends Phaser.Scene {
     this.populateActionPanel(this.actionPanel, colors);
 
     // ===== HUD Principal (Elementos Fijos y Vitales) =====
-    this.clockText = this.add.text(screenW / 2, 10, 'Nivel — Día 1', { fontSize: '14px', color: colors.textPrimary, fontStyle: 'bold', backgroundColor: 'rgba(0,0,0,0.5)', padding: { x: 10, y: 5 } }).setOrigin(0.5, 0).setDepth(100);
-    this.fpsText = this.add.text(screenW - 10, 10, 'FPS: 60', { fontSize: '10px', color: colors.dataAccent, backgroundColor: 'rgba(0,0,0,0.3)' }).setOrigin(1, 0).setDepth(100);
-    this.moneyText = this.add.text(screenW / 2, 35, '₲ 0', { fontSize: '24px', color: colors.bar.money, fontStyle: 'bold', backgroundColor: 'rgba(0,0,0,0.5)', padding: { x: 12, y: 5 } }).setOrigin(0.5, 0).setDepth(100);
+    const levelName = (LEVELS?.[TimeState.levelIdx]?.name) || t('ui.clockFallbackLevel');
+    const dayLabel = t('ui.dayLabel');
+    const initialClock = t('ui.clockDisplay', {
+      level: levelName,
+      dayLabel,
+      day: getSimDayNumber(),
+      totalDays: TimeState.levelDays ?? 0,
+      date: formatDate(getSimDate()),
+    });
+    this.clockText = this.add.text(screenW / 2, 10, initialClock, { fontSize: '14px', color: colors.textPrimary, fontStyle: 'bold', backgroundColor: 'rgba(0,0,0,0.5)', padding: { x: 10, y: 5 } }).setOrigin(0.5, 0).setDepth(100);
+    this.fpsText = this.add.text(screenW - 10, 10, t('ui.fpsLabel', { value: 60 }), { fontSize: '10px', color: colors.dataAccent, backgroundColor: 'rgba(0,0,0,0.3)' }).setOrigin(1, 0).setDepth(100);
+    this.moneyText = this.add.text(screenW / 2, 35, t('ui.moneyLabel', { value: 0 }), { fontSize: '24px', color: colors.bar.money, fontStyle: 'bold', backgroundColor: 'rgba(0,0,0,0.5)', padding: { x: 12, y: 5 } }).setOrigin(0.5, 0).setDepth(100);
 
     // Inicializa la animación de alerta crítica (Estrés por Calor)
     // Se inicializa el tween en el fondo de la barra de calor, el cual ya está creado en populateStatusPanel
@@ -80,11 +100,36 @@ export default class UIScene extends Phaser.Scene {
 
     // ===== Listeners de juego (Toasts y Inspección) =====
     this.game.events.on('inspect:parcela', (data) => {
+      const soilValueRaw = data.saludSuelo !== undefined && data.saludSuelo !== null
+        ? Number(data.saludSuelo) * 100
+        : null;
+      const soilValue = Number.isFinite(soilValueRaw)
+        ? `${soilValueRaw.toFixed(0)}%`
+        : t('ui.inspect.soilUnknown');
+
+      const cropProgressRaw = data.cultivo?.progreso !== undefined && data.cultivo?.progreso !== null
+        ? Number(data.cultivo.progreso) * 100
+        : null;
+      const cropLine = data.cultivo
+        ? t('ui.inspect.crop', {
+            type: data.cultivo.tipo,
+            stage: data.cultivo.etapa,
+            progress: cropProgressRaw !== null && Number.isFinite(cropProgressRaw) ? cropProgressRaw.toFixed(0) : '0',
+          })
+        : t('ui.inspect.cropNone');
+
+      const waterValueRaw = data.agua?.nivel !== undefined && data.agua?.nivel !== null
+        ? Number(data.agua.nivel) * 100
+        : null;
+      const waterLine = data.agua
+        ? t('ui.inspect.water', { value: `${Number.isFinite(waterValueRaw) ? waterValueRaw.toFixed(0) : '0'}%` })
+        : t('ui.inspect.waterNone');
+
       const lines = [
-        `Parcela: #${data.id}`,
-        `Suelo: ${data.saludSuelo ? (data.saludSuelo * 100).toFixed(0) + '%' : '??'}`,
-        data.cultivo ? `Cultivo: ${data.cultivo.tipo} (${data.cultivo.etapa} ${(data.cultivo.progreso * 100).toFixed(0)}%)` : 'Cultivo: -',
-        data.agua ? `Agua: ${(data.agua.nivel * 100).toFixed(0)}%` : 'Agua: -'
+        t('ui.inspect.parcel', { id: data.id ?? '--' }),
+        t('ui.inspect.soil', { value: soilValue }),
+        cropLine,
+        waterLine,
       ];
       this.inspectText.setText(lines.join('\n'));
     });
@@ -136,15 +181,15 @@ export default class UIScene extends Phaser.Scene {
     let y = 20;
 
     // Nombre / Ubicación
-    this.playerNameText = this.add.text(W / 2, y, 'Agente', { fontSize: '24px', color: colors.textPrimary, fontStyle: 'bold' }).setOrigin(0.5, 0); 
-    this.locationText   = this.add.text(W / 2, y += 30, 'Pampa Húmeda, AR', { fontSize: '16px', color: colors.textSecondary }).setOrigin(0.5, 0);
+    this.playerNameText = this.add.text(W / 2, y, t('ui.defaultPlayerName'), { fontSize: '24px', color: colors.textPrimary, fontStyle: 'bold' }).setOrigin(0.5, 0);
+    this.locationText   = this.add.text(W / 2, y += 30, t('ui.defaultLocation'), { fontSize: '16px', color: colors.textSecondary }).setOrigin(0.5, 0);
 
     // Día destacado (Aplica colores Data Accent)
-    this.dayText = this.add.text(W / 2, y += 30, 'Día: 1', {
+    this.dayText = this.add.text(W / 2, y += 30, t('ui.dayDisplay', { label: t('ui.dayLabel'), day: 1 }), {
       fontSize: '18px',
-      color: Phaser.Display.Color.IntegerToColor(colors.dataAccent).rgba, 
+      color: Phaser.Display.Color.IntegerToColor(colors.dataAccent).rgba,
       fontStyle: '600',
-      backgroundColor: Phaser.Display.Color.IntegerToColor(colors.dataPanelBg).rgba, 
+      backgroundColor: Phaser.Display.Color.IntegerToColor(colors.dataPanelBg).rgba,
       padding: { x: 12, y: 6 },
       align: 'center',
     }).setOrigin(0.5, 0);
@@ -153,12 +198,12 @@ export default class UIScene extends Phaser.Scene {
 
     // Barras
     this.bars = {
-      hp:       this.createHudBar('SALUD (NDVI)', y, colors.bar.hp, W, colors),
-      heat:     this.createHudBar('CALOR (Estrés)', y += 66, colors.bar.heat, W, colors),
-      water:    this.createHudBar('HUMEDAD (SMAP RZSM)', y += 66, colors.bar.water, W, colors),
-      humidity: this.createHudBar('LLUVIA (GPM)', y += 66, colors.bar.humidity, W, colors),
-      money:    this.createHudBar('DINERO ($)', y += 66, colors.bar.money, W, colors),
-      energy:   this.createHudBar('ENERGÍA (⚡)', y += 66, colors.bar.energy, W, colors),
+      hp:       this.createHudBar(t('ui.barLabels.health'), y, colors.bar.hp, W, colors),
+      heat:     this.createHudBar(t('ui.barLabels.heat'), y += 66, colors.bar.heat, W, colors),
+      water:    this.createHudBar(t('ui.barLabels.water'), y += 66, colors.bar.water, W, colors),
+      humidity: this.createHudBar(t('ui.barLabels.humidity'), y += 66, colors.bar.humidity, W, colors),
+      money:    this.createHudBar(t('ui.barLabels.money'), y += 66, colors.bar.money, W, colors),
+      energy:   this.createHudBar(t('ui.barLabels.energy'), y += 66, colors.bar.energy, W, colors),
     };
     Object.values(this.bars).forEach(bar => container.add(bar.elements));
 
@@ -167,8 +212,8 @@ export default class UIScene extends Phaser.Scene {
     container.add(sep1);
     y += 12;
 
-    this.inspectTitle = this.add.text(24, y, '🔬 Inspección de Parcela', { fontSize: '18px', color: colors.dataAccent, fontStyle: 'bold' });
-    this.inspectText  = this.add.text(24, y + 24, 'Selecciona una parcela…', { fontSize: '12px', color: colors.textSecondary, wordWrap: { width: W - 48 } });
+    this.inspectTitle = this.add.text(24, y, t('ui.inspectTitle'), { fontSize: '18px', color: colors.dataAccent, fontStyle: 'bold' });
+    this.inspectText  = this.add.text(24, y + 24, t('ui.inspectPlaceholder'), { fontSize: '12px', color: colors.textSecondary, wordWrap: { width: W - 48 } });
 
     container.add([this.playerNameText, this.locationText, this.dayText, this.inspectTitle, this.inspectText]);
     container.bringToTop(this.dayText);
@@ -177,8 +222,8 @@ export default class UIScene extends Phaser.Scene {
     container.add(sep2);
     y += 12;
 
-    this.alertsTitle = this.add.text(24, y, '⚠️ Alertas del Sistema', { fontSize: '18px', color: colors.bar.heat, fontStyle: 'bold' });
-    this.alertsText  = this.add.text(24, y + 24, 'No hay alertas activas.', { fontSize: '12px', color: colors.textPrimary, wordWrap: { width: W - 48 } });
+    this.alertsTitle = this.add.text(24, y, t('ui.alertsTitle'), { fontSize: '18px', color: colors.bar.heat, fontStyle: 'bold' });
+    this.alertsText  = this.add.text(24, y + 24, t('ui.alertsEmpty'), { fontSize: '12px', color: colors.textPrimary, wordWrap: { width: W - 48 } });
     container.add([this.alertsTitle, this.alertsText]);
   }
 
@@ -188,7 +233,7 @@ populateActionPanel(panel, colors) {
   const W = panel.width;
   let y = 20;
 
-  const title = this.add.text(W / 2, y, 'Decisiones', {
+  const title = this.add.text(W / 2, y, t('ui.actionPanelTitle'), {
     fontSize: '24px',
     color: colors.textPrimary,
     fontStyle: 'bold'
@@ -240,10 +285,10 @@ populateActionPanel(panel, colors) {
   };
 
   // --- BOTONES CLAVE (DECISIONES AGRÍCOLAS) ---
-  runAction('🚜 Arar',          'ARAR',         '🚜 Arado ejecutado',          colors.feedback.success, 'plowSelected');
-  runAction('💧 Regar',         'REGAR',        '💧 Riego ejecutado',          colors.feedback.success, 'waterSelected');
-  runAction('🌱 Sembrar',       'SEMBRAR',      '🌱 Siembra iniciada',         colors.feedback.success, 'plantSelected');
-  runAction('🌾 Cosechar',      'COSECHAR',     '🌾 Cosecha intentada',        0xfbbf24,               'harvestSelected');
+  runAction(t('ui.actions.plow.label'),     'ARAR',         t('ui.actions.plow.feedback'),     colors.feedback.success, 'plowSelected');
+  runAction(t('ui.actions.water.label'),    'REGAR',        t('ui.actions.water.feedback'),    colors.feedback.success, 'waterSelected');
+  runAction(t('ui.actions.plant.label'),    'SEMBRAR',      t('ui.actions.plant.feedback'),    colors.feedback.success, 'plantSelected');
+  runAction(t('ui.actions.harvest.label'),  'COSECHAR',     t('ui.actions.harvest.feedback'),  0xfbbf24,               'harvestSelected');
 
   // Separador
   const sep = this.add.graphics().fillStyle(colors.panelBorder, 0.5).fillRect(16, y += 40, W - 32, 2);
@@ -251,9 +296,9 @@ populateActionPanel(panel, colors) {
   y += 12;
 
   // --- AVANZADOS / TECNOLOGÍA & DATOS ---
-  runAction('⚙️ Mejorar (Tech)',   'UPGRADE_TECH', '⚙️ Abriendo Tech-Tree',      colors.dataAccent, null, 600);
-  runAction('🛰️ Escanear (Data)',  'SCAN_REGION',  '🛰️ Extrayendo Data NASA...', colors.dataAccent, null, 600);
-  runAction('💰 Vender Cosecha',    'SELL_HARVEST', '💰 Mercado actualizado',     colors.bar.money,  null, 600);
+  runAction(t('ui.actions.upgrade.label'), 'UPGRADE_TECH', t('ui.actions.upgrade.feedback'), colors.dataAccent, null, 600);
+  runAction(t('ui.actions.scan.label'),    'SCAN_REGION',  t('ui.actions.scan.feedback'),    colors.dataAccent, null, 600);
+  runAction(t('ui.actions.sell.label'),    'SELL_HARVEST', t('ui.actions.sell.feedback'),    colors.bar.money,  null, 600);
 }
     
   // ---------- Feedback flotante ----------
@@ -401,7 +446,8 @@ populateActionPanel(panel, colors) {
 
     // --- 2. Actualización de HUD Fijo y Efecto de Pulso en Día ---
     if (this.dayText) {
-        const currentDayText = `Día: ${dayN}`;
+        const dayLabel = t('ui.dayLabel');
+        const currentDayText = t('ui.dayDisplay', { label: dayLabel, day: dayN });
         if (this.dayText.text !== currentDayText) {
              // CINEMÁTICA: Pulso al cambiar el día
              this.tweens.add({
@@ -415,16 +461,22 @@ populateActionPanel(panel, colors) {
         }
         this.dayText.setText(currentDayText);
     }
-    
+
     // Actualización de HUD fijo
     if (this.clockText) {
+        const dayLabel = t('ui.dayLabel');
         this.clockText.setText(
-            `${L.name} — Día ${dayN}/${TimeState.levelDays} — ` +
-            `${getSimDate().getFullYear()}-${String(getSimDate().getMonth()+1).padStart(2,'0')}-${String(getSimDate().getDate()).padStart(2,'0')}`
+            t('ui.clockDisplay', {
+              level: L.name || t('ui.clockFallbackLevel'),
+              dayLabel,
+              day: dayN,
+              totalDays: TimeState.levelDays ?? 0,
+              date: formatDate(getSimDate()),
+            })
         );
     }
-    if (this.fpsText) this.fpsText.setText('FPS: ' + Math.floor(this.game.loop.actualFps || 0));
-    if (this.moneyText) this.moneyText.setText(`₲ ${player ? player.cartera.toFixed(0) : 0}`);
+    if (this.fpsText) this.fpsText.setText(t('ui.fpsLabel', { value: Math.floor(this.game.loop.actualFps || 0) }));
+    if (this.moneyText) this.moneyText.setText(t('ui.moneyLabel', { value: player ? player.cartera.toFixed(0) : 0 }));
     if (player && window.__CV_START__?.profile?.name && this.playerNameText) {
       this.playerNameText.setText(window.__CV_START__.profile.name);
     }
@@ -484,7 +536,7 @@ populateActionPanel(panel, colors) {
 
     // --- 5. Alertas (últimas 5) ---
     const alerts = repoAll('alertas').filter(a => a.visible !== false).slice(-5);
-    const atext = alerts.length ? alerts.map(a => `• ${a.mensaje}`).join('\n') : 'No hay alertas activas.';
+    const atext = alerts.length ? alerts.map(a => `• ${a.mensaje}`).join('\n') : t('ui.alertsEmpty');
     this.alertsText.setText(atext);
   }
 }

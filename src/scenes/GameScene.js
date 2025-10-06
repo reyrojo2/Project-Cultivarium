@@ -12,6 +12,7 @@ import { startLevel, tickSim, TimeState } from '../core/time.js';
 import { T, MAP_PRESETS, makePlayableMatrix, makeWorldMatrix, buildBlockIndex, buildFromPreset } from '../map/mapBuilder.js';
 import { DECOR, addDecor } from '../map/decor.js';
 import { CROP_CONFIG, isCultivoListo } from '../systems/cropSystem.js';
+import { getLanguage, setLanguage, translate as t } from '../utils/i18n.js';
 
 // === Proyección ISO 2:1 ===
 const PROJ_W = 256;
@@ -225,6 +226,8 @@ export default class GameScene extends Phaser.Scene {
   }
 
   create() {
+    setLanguage(window.__CV_START__?.language || getLanguage());
+
     const cam = this.cameras.main;
     this.ambient = this.add.rectangle(0, 0, 10, 10, 0x000000, 0)
       .setOrigin(0)
@@ -460,7 +463,7 @@ export default class GameScene extends Phaser.Scene {
 
     // HUD breve
     this.add.text(16, 8,
-      'ISO 256×128 — Arar (A) / Riega (R) / Cosecha (C) — Click bloque para seleccionar',
+      t('game.hudShortcuts'),
       { fontFamily:'ui-sans-serif, system-ui, sans-serif', fontSize:'14px', color:'#e2e8f0' }
     ).setScrollFactor(0);
 
@@ -555,14 +558,14 @@ plowSelected() {
   const p = repoGet('parcelas', this.selectedParcelaId);
   if (!p) return;
 
-  if (p.arada) { 
-    this.game.events.emit('toast', {type:'info', msg:`${p.id} ya está arada.`}); 
-    return; 
+  if (p.arada) {
+    this.game.events.emit('toast', { type:'info', msg: t('game.toasts.parcelAlreadyPlowed', { parcel: p.id }) });
+    return;
   }
-  
+
   p.arada = true;
   applyBlockVisual(this, p.id);
-  this.game.events.emit('toast', { type:'ok', msg:`Araste ${p.id}.` });
+  this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.plowSuccess', { parcel: p.id }) });
   
   const blockId = this.blockIdByParcelaId.get(p.id);
   if (blockId) this.drawBlockSelector(blockId);
@@ -580,7 +583,7 @@ waterSelected() {
 
   const player = findFirstPlayer();
   if (!spend(player, 10)) {
-    this.game.events.emit('toast', { type:'warn', msg:'Fondos insuficientes (10).' });
+    this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.insufficientFunds', { amount: 10 }) });
     return;
   }
 
@@ -588,9 +591,9 @@ waterSelected() {
     .map(rid => repoGet('recursos', rid))
     .find(r => r && r.tipo === 'AGUA');
 
-  if (!agua) { 
-    this.game.events.emit('toast', {type:'warn', msg:`La parcela ${p.id} no tiene AGUA.`}); 
-    return; 
+  if (!agua) {
+    this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.noWater', { parcel: p.id }) });
+    return;
   }
 
   agua.nivel = Math.min(1, (agua.nivel ?? 0) + 0.25);
@@ -601,7 +604,7 @@ waterSelected() {
     : State.clock + WET_DURATION;
 
   applyBlockVisual(this, p.id);
-  this.game.events.emit('toast', { type:'ok', msg:`Riego aplicado a ${p.id}.` });
+  this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.waterSuccess', { parcel: p.id }) });
 
   repoAll('alertas').forEach(a => { if (a.parcelaId === p.id) a.visible = false; });
   const blockId = this.blockIdByParcelaId.get(p.id);
@@ -615,16 +618,16 @@ harvestSelected() {
   const player = findFirstPlayer();
   
   if (!c) {
-    this.game.events.emit('toast', { type:'warn', msg:'No hay cultivo en esta parcela.' });
+    this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.noCrop') });
     return;
   }
 
   // Verificar si está listo para cosechar
   if (!isCultivoListo(c.id)) {
     const progresoPct = (c.progreso * 100).toFixed(0);
-    this.game.events.emit('toast', { 
-      type:'warn', 
-      msg:`${c.tipo} no está listo. Progreso: ${progresoPct}%` 
+    this.game.events.emit('toast', {
+      type:'warn',
+      msg: t('game.toasts.cropNotReady', { crop: c.tipo, progress: progresoPct })
     });
     return;
   }
@@ -632,7 +635,7 @@ harvestSelected() {
   // Obtener configuración del cultivo
   const config = CROP_CONFIG[c.tipo];
   if (!config) {
-    this.game.events.emit('toast', { type:'warn', msg:'Cultivo desconocido.' });
+    this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.unknownCrop') });
     return;
   }
 
@@ -650,9 +653,9 @@ harvestSelected() {
   State.repos.cultivos.delete(c.id);
   p.cultivoId = null;
 
-  this.game.events.emit('toast', { 
-    type:'ok', 
-    msg:`Cosechado ${config.nombre}: +${ganancia}` 
+  this.game.events.emit('toast', {
+    type:'ok',
+    msg: t('game.toasts.harvestSuccess', { crop: config.nombre, amount: ganancia })
   });
 
   const blockId = this.blockIdByParcelaId.get(p.id);
@@ -661,7 +664,7 @@ harvestSelected() {
 
 async plantSelected() {
   if (!this.selectedParcelaId) {
-    this.game.events.emit('toast', { type:'warn', msg:'Selecciona una parcela primero.' });
+    this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.selectParcelFirst') });
     return;
   }
 
@@ -670,9 +673,9 @@ async plantSelected() {
 
   // Verificar que esté arada
   if (!p.arada) {
-    this.game.events.emit('toast', { 
-      type:'warn', 
-      msg:'Debes arar la tierra primero (A).' 
+    this.game.events.emit('toast', {
+      type:'warn',
+      msg: t('game.toasts.plowFirst')
     });
     return;
   }
@@ -680,9 +683,9 @@ async plantSelected() {
   // Verificar que no tenga cultivo
   if (p.cultivoId) {
     const c = repoGet('cultivos', p.cultivoId);
-    this.game.events.emit('toast', { 
-      type:'info', 
-      msg:`${p.id} ya tiene ${c?.tipo || 'cultivo'}.` 
+    this.game.events.emit('toast', {
+      type:'info',
+      msg: t('game.toasts.parcelAlreadyPlanted', { parcel: p.id, crop: c?.tipo || t('game.toasts.genericCropName') })
     });
     return;
   }
@@ -704,9 +707,9 @@ openSeedMenu(parcelaId) {
   this.sembrarCultivo(parcelaId, 'MAIZ');
   
   // Mostrar opciones disponibles
-  this.game.events.emit('toast', { 
-    type:'info', 
-    msg:`Cultivos disponibles:\n${opciones}` 
+  this.game.events.emit('toast', {
+    type:'info',
+    msg: t('game.toasts.availableCrops', { list: opciones })
   });
 }
 
@@ -717,18 +720,18 @@ sembrarCultivo(parcelaId, tipoCultivo) {
 
   const config = CROP_CONFIG[tipoCultivo];
   if (!config) {
-    this.game.events.emit('toast', { 
-      type:'warn', 
-      msg:`Cultivo ${tipoCultivo} no existe.` 
+    this.game.events.emit('toast', {
+      type:'warn',
+      msg: t('game.toasts.cropMissing', { crop: tipoCultivo })
     });
     return;
   }
 
   const player = findFirstPlayer();
   if (!spend(player, config.costoSemilla)) {
-    this.game.events.emit('toast', { 
-      type:'warn', 
-      msg:`Fondos insuficientes ($${config.costoSemilla}).` 
+    this.game.events.emit('toast', {
+      type:'warn',
+      msg: t('game.toasts.insufficientFunds', { amount: `$${config.costoSemilla}` })
     });
     return;
   }
@@ -745,9 +748,9 @@ sembrarCultivo(parcelaId, tipoCultivo) {
   
   p.cultivoId = cultivo.id;
 
-  this.game.events.emit('toast', { 
-    type:'ok', 
-    msg:`Sembraste ${config.nombre} en ${p.id}.` 
+  this.game.events.emit('toast', {
+    type:'ok',
+    msg: t('game.toasts.plantSuccess', { crop: config.nombre, parcel: p.id })
   });
 
   const blockId = this.blockIdByParcelaId.get(p.id);
@@ -756,17 +759,17 @@ sembrarCultivo(parcelaId, tipoCultivo) {
 
 openTechTree() {
   // TODO: Abrir modal de mejoras
-  this.game.events.emit('toast', { 
-    type:'ok', 
-    msg:'Tech Tree (WIP): Riego por goteo, sensores, energía solar…' 
+  this.game.events.emit('toast', {
+    type:'ok',
+    msg: t('game.toasts.techTree')
   });
 }
 
 scanRegion() {
   if (!this.selectedParcelaId) {
-    this.game.events.emit('toast', { 
-      type:'warn', 
-      msg:'Selecciona una parcela para escanear.' 
+    this.game.events.emit('toast', {
+      type:'warn',
+      msg: t('game.toasts.selectParcelForScan')
     });
     return;
   }
@@ -782,12 +785,12 @@ scanRegion() {
   const ndvi     = Number(p.saludSuelo ?? 0.5);
   const heat     = Phaser.Math.Clamp(Math.random()*0.6, 0, 1);
 
-  const msg =
-    `🛰️ Scan NASA\n` +
-    `• SMAP (RZSM): ${(smapRZSM*100).toFixed(0)}%\n` +
-    `• NDVI (salud): ${(ndvi*100).toFixed(0)}%\n` +
-    `• Heat stress: ${(heat*100).toFixed(0)}%`;
-  
+  const msg = t('game.toasts.scanSummary', {
+    smap: (smapRZSM * 100).toFixed(0),
+    ndvi: (ndvi * 100).toFixed(0),
+    heat: (heat * 100).toFixed(0),
+  });
+
   this.game.events.emit('toast', { type:'ok', msg });
 }
 
@@ -824,14 +827,14 @@ sellHarvest() {
   const player = findFirstPlayer();
   if (total > 0) {
     player.cartera = (player.cartera || 0) + total;
-    this.game.events.emit('toast', { 
-      type:'ok', 
-      msg:`Venta realizada: ${conteo} cosechas = +${total}` 
+    this.game.events.emit('toast', {
+      type:'ok',
+      msg: t('game.toasts.sellSuccess', { count: conteo, amount: total })
     });
   } else {
-    this.game.events.emit('toast', { 
-      type:'warn', 
-      msg:'No hay cosechas listas.' 
+    this.game.events.emit('toast', {
+      type:'warn',
+      msg: t('game.toasts.noHarvestReady')
     });
   }
 }
