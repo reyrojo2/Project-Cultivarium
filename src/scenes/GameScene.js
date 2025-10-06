@@ -623,6 +623,22 @@ export default class GameScene extends Phaser.Scene {
     g.fillStyle(0x60a5fa, 0.06).fillPoints(pts, true);
   }
 
+  // Calcula un conjunto de métricas para renderizar los íconos de cultivo
+  // basadas en el ancho actual de la ventana. Esto asegura que los emojis
+  // sean legibles tanto en pantallas pequeñas como en monitores grandes.
+  getCultivoSpriteMetrics() {
+    const viewportWidth = this.scale?.width || 1280;
+    const scale = Phaser.Math.Clamp(viewportWidth / 1280, 0.75, 2.6);
+
+    const fontSize = Math.round(78 * scale);
+    return {
+      fontSize,
+      stroke: Math.max(4, Math.round(fontSize * 0.12)),
+      shadow: Math.max(6, Math.round(fontSize * 0.18)),
+      yOffset: Math.round(fontSize * 0.08)
+    };
+  }
+
   showCultivoSprite(parcelaId, tipoCultivo, etapa, progreso = 0) {
     const blockId = this.blockIdByParcelaId.get(parcelaId);
     if (!blockId) return;
@@ -649,13 +665,21 @@ export default class GameScene extends Phaser.Scene {
     const pos = this.blockPositions.get(blockId);
     if (!pos) return;
 
-    const emojiText = this.add.text(pos.x, pos.y, emoji, {
-      fontSize: '28px',
-      fontFamily: 'Arial',
+    // Escalamos el ícono en función del tamaño del viewport para que conserve
+    // presencia visual en cualquier resolución.
+    const metrics = this.getCultivoSpriteMetrics();
+    const emojiText = this.add.text(pos.x, pos.y - metrics.yOffset, emoji, {
+      fontSize: `${metrics.fontSize}px`,
+      fontFamily: 'Noto Color Emoji, "Segoe UI Emoji", system-ui, sans-serif',
+      align: 'center'
     }).setOrigin(0.5);
 
+    // Aplicamos trazo y sombra para que el ícono destaque sobre el suelo.
+    emojiText.setStroke('#0f172a', metrics.stroke);
+    emojiText.setShadow(0, metrics.shadow, 'rgba(15,23,42,0.65)', metrics.shadow * 1.5, true, true);
+
     const rep = this.spriteByParcela.get(parcelaId);
-    const baseDepth = rep ? rep.depth + 5 : pos.y + 5;
+    const baseDepth = rep ? rep.depth + 25 : pos.y + 50;
     emojiText.setDepth(baseDepth);
 
     this.cultivoSprites.set(parcelaId, emojiText);
@@ -819,6 +843,8 @@ export default class GameScene extends Phaser.Scene {
     }
 
     if (!parcelaId) return;
+    // Persistimos la fase actual para que los sistemas sepan si deben redibujar
+    // cuando cambie el progreso o la etapa lógica del cultivo.
     cultivo.__spritePhase = resolveSpritePhase(cultivo);
     this.showCultivoSprite(parcelaId, cultivo.tipo, cultivo.etapa, cultivo.progreso ?? 0);
   }
