@@ -14,6 +14,7 @@ import { startLevel, tickSim, getSimDayProgress01 } from '../core/time.js';
 import { T, MAP_PRESETS, makePlayableMatrix, makeWorldMatrix, buildBlockIndex } from '../map/mapBuilder.js';
 import { DECOR, addDecor } from '../map/decor.js';
 import { getLanguage, setLanguage, translate as t } from '../utils/i18n.js';
+import { WATER_ACTION_COST } from '../config/economy.js';
 
 // === Proyección ISO 2:1 ===
 const PROJ_W = 256;
@@ -837,8 +838,9 @@ export default class GameScene extends Phaser.Scene {
     if (!p) return;
 
     const player = findFirstPlayer();
-    if (!spend(player, 10)) {
-      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.insufficientFunds', { amount: 10 }) });
+    // Comprobamos contra el costo compartido para mantener la UI en sincronía.
+    if (!spend(player, WATER_ACTION_COST)) {
+      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.insufficientFunds', { amount: WATER_ACTION_COST }) });
       return;
     }
 

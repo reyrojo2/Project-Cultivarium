@@ -8,6 +8,7 @@ import { State, repoAll, repoGet } from '../core/state.js';
 import { Factory } from '../core/factory.js';
 import { ALERTAS_TIPO } from '../data/enums.js';
 import { translate as t } from '../utils/i18n.js';
+import { TimeState, MINUTES_PER_SIM_DAY } from '../core/time.js';
 
 const CROP_ALERT_CODE = 'CROP_DEAD';
 
@@ -78,11 +79,63 @@ export const CROP_CONFIG = {
   }
 };
 
-const BASE_GROWTH_RATE = 0.002;
-const HEALTH_RECOVERY_RATE = 0.0003;
-const HEALTH_DECAY_RATE = 0.0005;
+// Tasas expresadas “por día de simulación”. Las multiplicamos por deltaDays en runtime.
+const BASE_GROWTH_RATE = 1;
+const HEALTH_RECOVERY_PER_DAY = 0.10;
+const HEALTH_DECAY_PER_DAY = 0.15;
+const CROP_WATER_USE_PER_DAY = 0.12;
 const WATER_THRESHOLD_GROW = 0.2;
 const WATER_THRESHOLD_DECAY = 0.15;
+
+// Guardamos el último timestamp sim en minutos para calcular delta entre ticks.
+let lastSimMinutes = 0;
+
+/**
+ * Evaporación aproximada por día basada sólo en temperatura.
+ * A 30 °C devuelve ≈0.5, lo que obliga a regar dos veces por día.
+ */
+function calculateEvaporationPerDay(tempC = 25) {
+  const temp = Number.isFinite(tempC) ? tempC : 25;
+
+  if (temp <= 10) {
+    // Climas frescos: el agua se pierde muy despacio.
+    return 0.08 + (Math.max(temp, 0) / 10) * 0.02;
+  }
+  if (temp <= 20) {
+    const u = (temp - 10) / 10;
+    return 0.10 + u * 0.10;
+  }
+  if (temp <= 30) {
+    const u = (temp - 20) / 10;
+    return 0.20 + u * 0.18;
+  }
+  if (temp <= 35) {
+    const u = (temp - 30) / 5;
+    return 0.38 + u * 0.12;
+  }
+  const u = Math.min((temp - 35) / 10, 1);
+  return 0.50 + u * 0.10;
+}
+
+function computeDeltaSimDays() {
+  const currentMinutes = Number(TimeState?.simMinutes) || 0;
+  let deltaMinutes = currentMinutes - lastSimMinutes;
+
+  if (!Number.isFinite(deltaMinutes) || deltaMinutes < 0) {
+    deltaMinutes = 0;
+  }
+
+  let deltaDays = deltaMinutes / (MINUTES_PER_SIM_DAY || 1440);
+
+  if (deltaDays <= 0) {
+    // Fallback cuando el primer frame aún no avanza el reloj.
+    const minPerSec = Number(TimeState?.minPerRealSec) || 0;
+    deltaDays = (minPerSec / 60) / (MINUTES_PER_SIM_DAY || 1440);
+  }
+
+  lastSimMinutes = currentMinutes;
+  return Math.max(deltaDays, 0);
+}
 
 function notifyCropStageChange(cultivo) {
   if (typeof window === 'undefined') return;
@@ -94,6 +147,9 @@ function notifyCropStageChange(cultivo) {
 }
 
 export function tickCrops() {
+  const deltaDays = computeDeltaSimDays();
+  if (deltaDays <= 0) return;
+
   const parcelas = repoAll('parcelas');
 
   for (const p of parcelas) {
@@ -118,7 +174,7 @@ export function tickCrops() {
 
     const recAguaId = p.recursos.find(rid => State.repos.recursos.get(rid)?.tipo === 'AGUA');
     if (!recAguaId) {
-      cultivo.saludActual = Math.max(0, cultivo.saludActual - HEALTH_DECAY_RATE);
+      cultivo.saludActual = Math.max(0, cultivo.saludActual - (HEALTH_DECAY_PER_DAY * deltaDays));
       if (cultivo.saludActual <= 0 && cultivo.etapa !== 'MUERTO') {
         cultivo.etapa = 'MUERTO';
         notifyCropStageChange(cultivo);
@@ -131,10 +187,13 @@ export function tickCrops() {
 
     const recursoAgua = State.repos.recursos.get(recAguaId);
     const consumoAgua = config.consumoAgua ?? cultivo.consumoAgua ?? 1;
-    recursoAgua.nivel = Math.max(0, recursoAgua.nivel - (BASE_GROWTH_RATE * consumoAgua));
+    const evapPerDay = calculateEvaporationPerDay(p.temperatura ?? State?.climate?.temperature);
+    const cropUsePerDay = CROP_WATER_USE_PER_DAY * consumoAgua;
+    const totalLoss = (evapPerDay + cropUsePerDay) * deltaDays;
+    recursoAgua.nivel = Math.max(0, recursoAgua.nivel - totalLoss);
 
     if (recursoAgua.nivel > WATER_THRESHOLD_GROW) {
-      let velocidadCrecimiento = BASE_GROWTH_RATE * (30 / (config.diasCrecimiento || 30));
+      let velocidadCrecimiento = (BASE_GROWTH_RATE / (config.diasCrecimiento || 30)) * deltaDays;
 
       if (p.saludSuelo > 0.8) velocidadCrecimiento *= 1.2;
       if (p.saludSuelo < 0.4) velocidadCrecimiento *= 0.7;
@@ -144,7 +203,7 @@ export function tickCrops() {
       cultivo.progreso = Math.min(1, cultivo.progreso + velocidadCrecimiento);
 
       if (cultivo.saludActual < 1 && recursoAgua.nivel > 0.5) {
-        cultivo.saludActual = Math.min(1, cultivo.saludActual + HEALTH_RECOVERY_RATE);
+        cultivo.saludActual = Math.min(1, cultivo.saludActual + (HEALTH_RECOVERY_PER_DAY * deltaDays));
       }
 
       const etapaAnterior = cultivo.etapa;
@@ -153,7 +212,7 @@ export function tickCrops() {
         notifyCropStageChange(cultivo);
       }
     } else if (recursoAgua.nivel < WATER_THRESHOLD_DECAY) {
-      cultivo.saludActual = Math.max(0, cultivo.saludActual - HEALTH_DECAY_RATE);
+      cultivo.saludActual = Math.max(0, cultivo.saludActual - (HEALTH_DECAY_PER_DAY * deltaDays));
       if (cultivo.saludActual <= 0 && cultivo.etapa !== 'MUERTO') {
         cultivo.etapa = 'MUERTO';
         notifyCropStageChange(cultivo);

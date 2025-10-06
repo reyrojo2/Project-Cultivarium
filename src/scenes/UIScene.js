@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { State, repoAll, findFirstPlayer, repoGet } from '../core/state.js';
 import { TimeState, getSimDate, getSimDayNumber, LEVELS } from '../core/time.js';
 import { getLanguage, translate as t } from '../utils/i18n.js';
+import { ACTION_FUNDS_REQUIREMENTS, getMinimumSeedCost } from '../config/economy.js';
 
 export default class UIScene extends Phaser.Scene {
   constructor() {
@@ -338,10 +339,12 @@ populateActionPanel(panel, colors) {
 
       btn.coolingDown = false;
       btn.actionKey = cfg.key;
+      // Guardamos el requisito monetario para habilitar/deshabilitar el botón en update().
+      const minFunds = ACTION_FUNDS_REQUIREMENTS?.[cfg.key] ?? 0;
 
       container.add(btn.elements);
       this.actionButtons.push(btn);
-      this.actionButtonsMeta.push({ button: btn, config: { ...cfg, cooldownMs } });
+      this.actionButtonsMeta.push({ button: btn, config: { ...cfg, cooldownMs, minFunds } });
       y += 65;
     });
   };
@@ -662,7 +665,7 @@ populateActionPanel(panel, colors) {
     const dateStr = this.formatDateForLang(simDate, lang);
 
     let hasEnergy = true;
-    let canAfford = true;
+    let availableFunds = 0;
     let heatValue = 0;
 
     const useMockState = false;
@@ -683,7 +686,7 @@ populateActionPanel(panel, colors) {
         }
       });
       hasEnergy = mock.energy > 0.1;
-      canAfford = mock.money > 0.1;
+      availableFunds = mock.money * 10000;
       heatValue = mock.heat;
     } else if (this.bars) {
       if (parcela) {
@@ -708,7 +711,7 @@ populateActionPanel(panel, colors) {
         if (this.bars.money) this.bars.money.update((player.cartera ?? 0) / 10000);
         if (this.bars.energy) this.bars.energy.update((player.energiaActual ?? 0) / eMax);
         hasEnergy = (player.energiaActual ?? 0) > (eMax * 0.1);
-        canAfford = (player.cartera ?? 0) > 50;
+        availableFunds = player.cartera ?? 0;
       }
     }
 
@@ -776,31 +779,39 @@ populateActionPanel(panel, colors) {
       }
     }
 
-    this.actionButtons.forEach(button => {
-      if (!button || !button.bg) return;
-      const bg = button.bg;
+    // Cada botón evalúa su propio requisito de dinero para evitar falsos negativos.
+    const minSeedCost = getMinimumSeedCost();
+    this.actionButtonsMeta.forEach(({ button, config }) => {
+      if (!button?.bg) return;
 
-      const previouslyEnabled = bg.input && bg.input.enabled;
-      const isEnabled = hasEnergy && canAfford;
+      const requiredFunds = config.key === 'plant'
+        ? minSeedCost
+        : (config.minFunds ?? 0);
+      const meetsFunds = availableFunds >= requiredFunds;
+      const shouldEnable = hasEnergy && meetsFunds && !button.coolingDown;
+      const isInteractive = button.bg.input?.enabled ?? false;
 
-      bg.setAlpha(isEnabled ? 1 : 0.55);
-
-      if (isEnabled) {
-        if (!previouslyEnabled) {
+      if (shouldEnable) {
+        if (!isInteractive) {
+          button.enable();
           this.tweens.add({
-            targets: [bg, button.text],
+            targets: [button.bg, button.text],
             scale: 1.02,
             duration: 100,
             yoyo: true,
             repeat: 0,
             ease: 'Quad.easeOut'
           });
-          bg.setInteractive({ useHandCursor: true });
-          bg.fillColor = this.colors.actionButton;
+        } else {
+          button.bg.fillColor = this.colors.actionButton;
+          button.bg.setAlpha(1);
         }
-      } else if (previouslyEnabled) {
-        bg.disableInteractive();
-        bg.fillColor = this.colors.actionButtonDisabled;
+      } else {
+        if (isInteractive) {
+          button.disable();
+        }
+        button.bg.fillColor = this.colors.actionButtonDisabled;
+        button.bg.setAlpha(0.55);
       }
     });
 
