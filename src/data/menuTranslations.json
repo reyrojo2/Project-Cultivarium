@@ -24,11 +24,11 @@
         },
         "ui": {
             "defaultPlayerName": "Agente",
-            "defaultLocation": "Pampa H\u00fameda, AR",
+            "levelDisplay": "Nivel: {{level}}",
             "dayLabel": "D\u00eda",
             "dayDisplay": "{{label}}: {{day}}",
             "clockFallbackLevel": "Nivel",
-            "clockDisplay": "{{level}} \u2014 {{dayLabel}} {{day}}/{{totalDays}} \u2014 {{date}}",
+            "clockDisplay": "{{dayLabel}} {{day}}/{{totalDays}} \u2014 {{date}}",
             "fpsLabel": "FPS: {{value}}",
             "moneyLabel": "\u20b2 {{value}}",
             "inspectTitle": "\ud83d\udd2c Inspecci\u00f3n de Parcela",
@@ -41,10 +41,18 @@
                 "cropNone": "Cultivo: -",
                 "water": "Agua: {{value}}",
                 "waterNone": "Agua: -",
-                "pest": "Plaga: "
+                "pest": "Plaga: ",
+                "pestActive": "Activa",
+                "pestInactive": "Inactiva"
             },
             "alertsTitle": "\u26a0\ufe0f Alertas del Sistema",
             "alertsEmpty": "No hay alertas activas.",
+            "alerts": {
+                "lowWater": "Agua baja en parcela {{parcel}}",
+                "pestDetected": "Plaga detectada en parcela {{parcel}}",
+                "pestCritical": "Plaga crítica en parcela {{parcel}}",
+                "cropDied": "El cultivo murió en parcela {{parcel}}"
+            },
             "actionPanelTitle": "Decisiones",
             "barLabels": {
                 "health": "SALUD (NDVI)",
@@ -138,11 +146,11 @@
         },
         "ui": {
             "defaultPlayerName": "Agent",
-            "defaultLocation": "Humid Pampas, AR",
+            "levelDisplay": "Level: {{level}}",
             "dayLabel": "Day",
             "dayDisplay": "{{label}}: {{day}}",
             "clockFallbackLevel": "Level",
-            "clockDisplay": "{{level}} \u2014 {{dayLabel}} {{day}}/{{totalDays}} \u2014 {{date}}",
+            "clockDisplay": "{{dayLabel}} {{day}}/{{totalDays}} \u2014 {{date}}",
             "fpsLabel": "FPS: {{value}}",
             "moneyLabel": "\u20b2 {{value}}",
             "inspectTitle": "\ud83d\udd2c Plot Inspection",
@@ -155,10 +163,18 @@
                 "cropNone": "Crop: -",
                 "water": "Water: {{value}}",
                 "waterNone": "Water: -",
-                "pest":"Pest: "
+                "pest":"Pest: ",
+                "pestActive": "Active",
+                "pestInactive": "Inactive"
             },
             "alertsTitle": "\u26a0\ufe0f System Alerts",
             "alertsEmpty": "No active alerts.",
+            "alerts": {
+                "lowWater": "Low water on plot {{parcel}}",
+                "pestDetected": "Pest detected on plot {{parcel}}",
+                "pestCritical": "Critical pest on plot {{parcel}}",
+                "cropDied": "Crop died on plot {{parcel}}"
+            },
             "actionPanelTitle": "Decisions",
             "barLabels": {
                 "health": "HEALTH (NDVI)",
