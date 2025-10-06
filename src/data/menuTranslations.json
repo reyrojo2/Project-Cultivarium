@@ -1,0 +1,226 @@
+{
+    "es": {
+        "menu": {
+            "languageLabel": "Idioma",
+            "menu.title": "CULTIVARIUM",
+            "startButton": "INICIAR JUEGO",
+            "videoButton": "VIDEOTUTORIAL (Pr\u00f3x.)",
+            "profileTitle": "Crea tu Perfil de Agente",
+            "playerNamePlaceholder": "Tu Nombre",
+            "defaultPlayerName": "Agente",
+            "profileContinue": "Continuar",
+            "modeSelectTitle": "Selecciona tu Misi\u00f3n",
+            "modeAdventureTitle": "Modo Aventura",
+            "modeAdventureDescription": "Campa\u00f1a global por biomas y niveles.",
+            "modeLegacyTitle": "Modo Legado",
+            "modeLegacyDescription": "Sandbox infinito en una regi\u00f3n.",
+            "countries": {
+                "peru": "Per\u00fa",
+                "india": "India",
+                "brazil": "Brasil",
+                "ethiopia": "Etiop\u00eda",
+                "usa": "EE.UU."
+            }
+        },
+        "ui": {
+            "defaultPlayerName": "Agente",
+            "defaultLocation": "Pampa H\u00fameda, AR",
+            "dayLabel": "D\u00eda",
+            "dayDisplay": "{{label}}: {{day}}",
+            "clockFallbackLevel": "Nivel",
+            "clockDisplay": "{{level}} \u2014 {{dayLabel}} {{day}}/{{totalDays}} \u2014 {{date}}",
+            "fpsLabel": "FPS: {{value}}",
+            "moneyLabel": "\u20b2 {{value}}",
+            "inspectTitle": "\ud83d\udd2c Inspecci\u00f3n de Parcela",
+            "inspectPlaceholder": "Selecciona una parcela\u2026",
+            "inspect": {
+                "parcel": "Parcela: #{{id}}",
+                "soil": "Suelo: {{value}}",
+                "soilUnknown": "??",
+                "crop": "Cultivo: {{type}} ({{stage}} {{progress}}%)",
+                "cropNone": "Cultivo: -",
+                "water": "Agua: {{value}}",
+                "waterNone": "Agua: -"
+            },
+            "alertsTitle": "\u26a0\ufe0f Alertas del Sistema",
+            "alertsEmpty": "No hay alertas activas.",
+            "actionPanelTitle": "Decisiones",
+            "barLabels": {
+                "health": "SALUD (NDVI)",
+                "heat": "CALOR (Estr\u00e9s)",
+                "water": "HUMEDAD (SMAP RZSM)",
+                "humidity": "LLUVIA (GPM)",
+                "money": "DINERO ($)",
+                "energy": "ENERG\u00cdA (\u26a1)"
+            },
+            "actions": {
+                "plow": {
+                    "label": "\ud83d\ude9c Arar",
+                    "feedback": "\ud83d\ude9c Arado ejecutado"
+                },
+                "water": {
+                    "label": "\ud83d\udca7 Regar",
+                    "feedback": "\ud83d\udca7 Riego ejecutado"
+                },
+                "plant": {
+                    "label": "\ud83c\udf31 Sembrar",
+                    "feedback": "\ud83c\udf31 Siembra iniciada"
+                },
+                "harvest": {
+                    "label": "\ud83c\udf3e Cosechar",
+                    "feedback": "\ud83c\udf3e Cosecha intentada"
+                },
+                "upgrade": {
+                    "label": "\u2699\ufe0f Mejorar (Tech)",
+                    "feedback": "\u2699\ufe0f Abriendo Tech-Tree"
+                },
+                "scan": {
+                    "label": "\ud83d\udef0\ufe0f Escanear (Data)",
+                    "feedback": "\ud83d\udef0\ufe0f Extrayendo Data NASA..."
+                },
+                "sell": {
+                    "label": "\ud83d\udcb0 Vender Cosecha",
+                    "feedback": "\ud83d\udcb0 Mercado actualizado"
+                }
+            }
+        },
+        "game": {
+            "hudShortcuts": "ISO 256\u00d7128 \u2014 Arar (A) / Riega (R) / Cosecha (C) \u2014 Click bloque para seleccionar",
+            "toasts": {
+                "parcelAlreadyPlowed": "{{parcel}} ya est\u00e1 arada.",
+                "plowSuccess": "Araste {{parcel}}.",
+                "insufficientFunds": "Fondos insuficientes ({{amount}}).",
+                "noWater": "La parcela {{parcel}} no tiene AGUA.",
+                "waterSuccess": "Riego aplicado a {{parcel}}.",
+                "noCrop": "No hay cultivo en esta parcela.",
+                "cropNotReady": "{{crop}} no est\u00e1 listo. Progreso: {{progress}}%",
+                "unknownCrop": "Cultivo desconocido.",
+                "harvestSuccess": "Cosechado {{crop}}: +{{amount}}",
+                "selectParcelFirst": "Selecciona una parcela primero.",
+                "plowFirst": "Debes arar la tierra primero (A).",
+                "parcelAlreadyPlanted": "{{parcel}} ya tiene {{crop}}.",
+                "availableCrops": "Cultivos disponibles:\n{{list}}",
+                "cropMissing": "Cultivo {{crop}} no existe.",
+                "plantSuccess": "Sembraste {{crop}} en {{parcel}}.",
+                "techTree": "Tech Tree (WIP): Riego por goteo, sensores, energ\u00eda solar\u2026",
+                "selectParcelForScan": "Selecciona una parcela para escanear.",
+                "scanSummary": "\ud83d\udef0\ufe0f Scan NASA\n\u2022 SMAP (RZSM): {{smap}}%\n\u2022 NDVI (salud): {{ndvi}}%\n\u2022 Estr\u00e9s t\u00e9rmico: {{heat}}%",
+                "sellSuccess": "Venta realizada: {{count}} cosechas = +{{amount}}",
+                "noHarvestReady": "No hay cosechas listas.",
+                "genericCropName": "cultivo"
+            }
+        }
+    },
+    "en": {
+        "menu": {
+            "languageLabel": "Language",
+            "menu.title": "CULTIVARIUM",
+            "startButton": "START GAME",
+            "videoButton": "VIDEO TUTORIAL (Coming Soon)",
+            "profileTitle": "Create Your Agent Profile",
+            "playerNamePlaceholder": "Your Name",
+            "defaultPlayerName": "Agent",
+            "profileContinue": "Continue",
+            "modeSelectTitle": "Choose Your Mission",
+            "modeAdventureTitle": "Adventure Mode",
+            "modeAdventureDescription": "Global campaign across biomes and levels.",
+            "modeLegacyTitle": "Legacy Mode",
+            "modeLegacyDescription": "Endless sandbox in a single region.",
+            "countries": {
+                "peru": "Peru",
+                "india": "India",
+                "brazil": "Brazil",
+                "ethiopia": "Ethiopia",
+                "usa": "USA"
+            }
+        },
+        "ui": {
+            "defaultPlayerName": "Agent",
+            "defaultLocation": "Humid Pampas, AR",
+            "dayLabel": "Day",
+            "dayDisplay": "{{label}}: {{day}}",
+            "clockFallbackLevel": "Level",
+            "clockDisplay": "{{level}} \u2014 {{dayLabel}} {{day}}/{{totalDays}} \u2014 {{date}}",
+            "fpsLabel": "FPS: {{value}}",
+            "moneyLabel": "\u20b2 {{value}}",
+            "inspectTitle": "\ud83d\udd2c Plot Inspection",
+            "inspectPlaceholder": "Select a plot\u2026",
+            "inspect": {
+                "parcel": "Plot: #{{id}}",
+                "soil": "Soil: {{value}}",
+                "soilUnknown": "??",
+                "crop": "Crop: {{type}} ({{stage}} {{progress}}%)",
+                "cropNone": "Crop: -",
+                "water": "Water: {{value}}",
+                "waterNone": "Water: -"
+            },
+            "alertsTitle": "\u26a0\ufe0f System Alerts",
+            "alertsEmpty": "No active alerts.",
+            "actionPanelTitle": "Decisions",
+            "barLabels": {
+                "health": "HEALTH (NDVI)",
+                "heat": "HEAT (Stress)",
+                "water": "SOIL MOISTURE (SMAP RZSM)",
+                "humidity": "RAINFALL (GPM)",
+                "money": "MONEY ($)",
+                "energy": "ENERGY (\u26a1)"
+            },
+            "actions": {
+                "plow": {
+                    "label": "\ud83d\ude9c Plow",
+                    "feedback": "\ud83d\ude9c Plow complete"
+                },
+                "water": {
+                    "label": "\ud83d\udca7 Water",
+                    "feedback": "\ud83d\udca7 Irrigation applied"
+                },
+                "plant": {
+                    "label": "\ud83c\udf31 Plant",
+                    "feedback": "\ud83c\udf31 Planting started"
+                },
+                "harvest": {
+                    "label": "\ud83c\udf3e Harvest",
+                    "feedback": "\ud83c\udf3e Harvest attempt"
+                },
+                "upgrade": {
+                    "label": "\u2699\ufe0f Upgrade (Tech)",
+                    "feedback": "\u2699\ufe0f Opening Tech Tree"
+                },
+                "scan": {
+                    "label": "\ud83d\udef0\ufe0f Scan (Data)",
+                    "feedback": "\ud83d\udef0\ufe0f Pulling NASA Data..."
+                },
+                "sell": {
+                    "label": "\ud83d\udcb0 Sell Harvest",
+                    "feedback": "\ud83d\udcb0 Market updated"
+                }
+            }
+        },
+        "game": {
+            "hudShortcuts": "ISO 256\u00d7128 \u2014 Plow (A) / Water (R) / Harvest (C) \u2014 Click a block to select",
+            "toasts": {
+                "parcelAlreadyPlowed": "{{parcel}} is already plowed.",
+                "plowSuccess": "You plowed {{parcel}}.",
+                "insufficientFunds": "Insufficient funds ({{amount}}).",
+                "noWater": "Parcel {{parcel}} has no WATER.",
+                "waterSuccess": "Irrigation applied to {{parcel}}.",
+                "noCrop": "No crop on this parcel.",
+                "cropNotReady": "{{crop}} is not ready. Progress: {{progress}}%",
+                "unknownCrop": "Unknown crop.",
+                "harvestSuccess": "Harvested {{crop}}: +{{amount}}",
+                "selectParcelFirst": "Select a parcel first.",
+                "plowFirst": "You must plow the soil first (A).",
+                "parcelAlreadyPlanted": "{{parcel}} already has {{crop}}.",
+                "availableCrops": "Available crops:\n{{list}}",
+                "cropMissing": "Crop {{crop}} does not exist.",
+                "plantSuccess": "You planted {{crop}} on {{parcel}}.",
+                "techTree": "Tech Tree (WIP): Drip irrigation, sensors, solar energy\u2026",
+                "selectParcelForScan": "Select a parcel to scan.",
+                "scanSummary": "\ud83d\udef0\ufe0f NASA Scan\n\u2022 SMAP (RZSM): {{smap}}%\n\u2022 NDVI (health): {{ndvi}}%\n\u2022 Heat stress: {{heat}}%",
+                "sellSuccess": "Sale complete: {{count}} harvests = +{{amount}}",
+                "noHarvestReady": "No harvests ready.",
+                "genericCropName": "crop"
+            }
+        }
+    }
+}

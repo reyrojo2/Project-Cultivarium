@@ -115,3 +115,47 @@
 
 /* ===== Utilidades ===== */
 .mt-12{ margin-top:1.2rem; }
+
+/* ===== Selector de idioma flotante ===== */
+.lang-floating-btn{
+  position:absolute; left:1rem; bottom:1rem; z-index:1000;
+  width:55px; height:55px; border-radius:9999px;
+  border:1px solid rgba(255,255,255,.25);
+  background:rgba(15,23,42,.65);
+  backdrop-filter:blur(8px);
+  color:#F4F0E1; font-size:20px; font-weight:800; cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+  box-shadow:0 6px 20px rgba(0,0,0,.35);
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.lang-floating-btn:hover{ transform:translateY(-1px); box-shadow:0 8px 24px rgba(0,0,0,.4); }
+.lang-floating-btn:focus{ outline:2px solid rgba(230,214,166,.8); outline-offset:2px; }
+
+/* Menú emergente de idioma */
+.lang-menu{
+  position:absolute; left:1rem; bottom:4.2rem; z-index:1000;
+  background:rgba(15,23,42,.85);
+  border:1px solid rgba(255,255,255,.2);
+  backdrop-filter:blur(8px);
+  border-radius:12px; padding:.4rem;
+  display:none; gap:.25rem; flex-direction:column;
+  box-shadow:0 10px 24px rgba(0,0,0,.45);
+  min-width:96px;
+}
+.lang-menu.open{ display:flex; }
+
+.lang-item{
+  background:transparent; color:#F4F0E1; border:none;
+  padding:.5rem .8rem; border-radius:8px; text-align:left; cursor:pointer;
+  font-weight:800; letter-spacing:.02em;
+}
+.lang-item:hover, .lang-item:focus{
+  background:rgba(230,214,166,.15);
+  outline:none;
+}
+
+/* Opcional: compactar en pantallas muy pequeñas */
+@media (max-width: 420px){
+  .lang-floating-btn{ width:44px; height:44px; font-size:18px; }
+  .lang-menu{ bottom:4rem; }
+}

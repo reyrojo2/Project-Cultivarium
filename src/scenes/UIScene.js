@@ -17,6 +17,9 @@ export default class UIScene extends Phaser.Scene {
     this.dayText = null;
     this.playerNameText = null;
     this.heatAlertTween = null; // Control del Tween
+    this._dom = null;        // refs DOM cacheadas
+    this._domLast = null;    // último snapshot para evitar trabajo repetido
+    this._domDay = null;     // último día escrito en DOM
   }
 
   create() {
@@ -418,6 +421,10 @@ populateActionPanel(panel, colors) {
         this.bars.water.update(parcela.humedadSueloSMAP ?? 0);
         this.bars.heat.update(parcela.estresTermico ?? 0);
         heatValue = parcela.estresTermico ?? 0;
+      }
+      if ((!parcela || heatValue == null) && State?.clima?.estresTermico01 != null) {
+        heatValue = State.clima.estresTermico01;
+        this.bars.heat.update(heatValue);
       }
       this.bars.humidity.update(State?.clima?.lluviaGPM ?? 0); 
       

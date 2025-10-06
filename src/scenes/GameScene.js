@@ -1,20 +1,25 @@
+// GameScene.js (unificado con i18n)
 import Phaser from 'phaser';
 import { GAME } from '../main.js';
 import { State, repoAll, repoGet } from '../core/state.js';
 import { Factory } from '../core/factory.js';
 import { EVENTOS_TIPO, NIVELES } from '../data/enums.js';
 import { tickClimate } from '../systems/climateSystem.js';
+import { getSimDayNumber } from '../core/time.js';
 import { tickCrops } from '../systems/cropSystem.js';
 import { tickPlagues } from '../systems/plagueSystem.js';
 import { tickAlerts } from '../systems/alertSystem.js';
 import { findFirstPlayer, spend } from '../core/state.js';
 import { startLevel, tickSim, getSimDayProgress01 } from '../core/time.js';
-import { T, MAP_PRESETS, makePlayableMatrix, makeWorldMatrix, buildBlockIndex, buildFromPreset } from '../map/mapBuilder.js';
+import { T, MAP_PRESETS, makePlayableMatrix, makeWorldMatrix, buildBlockIndex } from '../map/mapBuilder.js';
 import { DECOR, addDecor } from '../map/decor.js';
+import { getLanguage, setLanguage, translate as t } from '../utils/i18n.js';
 
 // === Proyección ISO 2:1 ===
 const PROJ_W = 256;
 const PROJ_H = 128;
+
+let _lastDay = -1;
 
 // 0..1 → curvas suaves
 const smoothstep = (t)=> t*t*(3-2*t);
@@ -139,12 +144,9 @@ const jitterColor = (r,g,b, jr=6,jg=6,jb=4) => {
 // ============================================================================
 //                               MAP BUILDER (MATRIZ)
 // ============================================================================
-
-// Cambia este nombre para otro preset
 const SELECTED_MAP = 'base_4x3_9x9';
 
 function applyBlockVisual(scene, parcelaId) {
-  // parcelaId -> blockId -> sprites[]
   const blockId = scene.blockIdByParcelaId.get(parcelaId);
   if (!blockId) return;
   const p = repoGet('parcelas', parcelaId);
@@ -192,7 +194,6 @@ function occupyRect(occ, gx, gy, w, h) {
     if (occ[Y] && typeof occ[Y][X] !== 'undefined') occ[Y][X] = true;
   }
 }
-// coloca y marca ocupación (usa addDecor de decor.js)
 function place(scene, isoProject, occ, world, gx, gy, name, opts = {}) {
   const def = DECOR[name];
   if (!def) return null;
@@ -201,30 +202,35 @@ function place(scene, isoProject, occ, world, gx, gy, name, opts = {}) {
   return addDecor(scene, isoProject, gx, gy, name, opts);
 }
 
-
 export default class GameScene extends Phaser.Scene {
   constructor() {
     super('Game');
     this.selectedParcelaId = null;
     this.cursors = null;
-    this.keyW = null;
-    this.keyD = null;
-    this.keyS = null;
-    this.keyX = null;
+    // atajos originales
+    this.keyW = null; // REGAR
+    this.keyD = null; // COSECHAR
+    this.keyS = null; // SELL_HARVEST
+    this.keyX = null; // TECH
+    this.keyA = null; // ARAR
     this.camSpeed = 400;
     this.selector = null;
     this.offX = 0; this.offY = 0;
+
     // mapas
-    this.spritesByBlockId = new Map();  // blockId -> sprite[]
-    this.parcelaByBlockId = new Map();  // blockId -> parcelaObj
-    this.blockIdByParcelaId = new Map();// parcelaId -> blockId
-    this.keyA = null;
+    this.spritesByBlockId = new Map();
+    this.parcelaByBlockId = new Map();
+    this.blockIdByParcelaId = new Map();
+
     this._cooldowns = { water: 0, plow: 0, harvest: 0, plant: 0 };
-    this.decorEntries = [];      // ← entradas {sprite, shadow, def} de addDecor()
-    this.timeOfDay = 0.5;          // 0..1 (se sincroniza con la simulación al iniciar)
+    this.decorEntries = []; // {sprite, shadow}
+    this.timeOfDay = 0.5;   // 0..1 (se sincroniza con la simulación al iniciar)
   }
 
   create() {
+    // === i18n: fija idioma desde bootstrap o localStorage ===
+    setLanguage(window.__CV_START__?.language || getLanguage());
+
     const cam = this.cameras.main;
     cam.setBackgroundColor(0x859e70);
 
@@ -242,11 +248,9 @@ export default class GameScene extends Phaser.Scene {
 
     if (!this.textures.exists('shadowSoft')) {
       const g = this.make.graphics({ x:0, y:0, add:false });
-      // centro
       g.fillStyle(0x000000, 0.22); g.fillEllipse(128, 64, 220, 90);
-      // anillos suaves
       for (let i = 1; i <= 6; i++) {
-        const a = 0.22 * (1 - i / 7);     // alpha decreciente hacia afuera
+        const a = 0.22 * (1 - i / 7);
         g.fillStyle(0x000000, a);
         g.fillEllipse(128, 64, 220 + i*20, 90 + i*10);
       }
@@ -255,15 +259,12 @@ export default class GameScene extends Phaser.Scene {
     }
 
     // ==== Selección de mapa (preset) ====
-    // Asegúrate de definir SELECTED_MAP en tu archivo o reemplaza por una clave fija, ej: 'base_4x3_9x9'
-    const cfg = MAP_PRESETS[SELECTED_MAP]; // ej: MAP_PRESETS.base_4x3_9x9
+    const cfg = MAP_PRESETS[SELECTED_MAP];
     const { plotsX, plotsY, parcelaSize, pathW, grassBorder } = cfg;
 
-    // Matriz jugable (41x31 para 4x3 de 9x9 con caminos 1)
     const play = makePlayableMatrix(plotsX, plotsY, parcelaSize, pathW);
     const { blocks, blockIdAt, PLAY_W, PLAY_H } = buildBlockIndex(plotsX, plotsY, parcelaSize, pathW);
 
-    // Inserta el área jugable en borde de pasto y obtén dimensiones
     const { world, dims } = makeWorldMatrix(play, grassBorder);
     const {
       TOTAL_W, TOTAL_H,
@@ -274,14 +275,14 @@ export default class GameScene extends Phaser.Scene {
     this.offX = this.scale.width / 2;
     this.offY = 140;
 
-    // === Colecciones por bloque/parcela ===
+    // colecciones
     this.spritesByBlockId = new Map();
     this.parcelaByBlockId = new Map();
     this.blockIdByParcelaId = new Map();
-    this.spriteByParcela = new Map();    // parcelaId -> sprite representante (p/visual)
+    this.spriteByParcela = new Map();
     this.selectedParcelaId = null;
 
-    // helper: world coords -> blockId (dentro del área jugable)
+    // helper
     this.blockIdAtWorld = (gy, gx) => {
       const y = gy - grassBorder;
       const x = gx - grassBorder;
@@ -289,7 +290,7 @@ export default class GameScene extends Phaser.Scene {
       return blockIdAt[y][x];
     };
 
-    // === Render desde la matriz `world` ===
+    // === Render desde la matriz world ===
     for (let gy = 0; gy < TOTAL_H; gy++) {
       for (let gx = 0; gx < TOTAL_W; gx++) {
         const type = world[gy][gx];
@@ -304,11 +305,9 @@ export default class GameScene extends Phaser.Scene {
           tile.setTint(0x9aa3a1);
           continue;
         }
-        if (type === T.GRASS) {
-          continue;
-        }
+        if (type === T.GRASS) continue;
 
-        // SOIL base (seca)
+        // SOIL base
         tile.setTintFill(jitterColor(SOIL_DRY.r, SOIL_DRY.g, SOIL_DRY.b, 6, 6, 4));
 
         const blockId = this.blockIdAtWorld(gy, gx);
@@ -320,7 +319,7 @@ export default class GameScene extends Phaser.Scene {
       }
     }
 
-    // === 1 “parcela lógica” por bloque ===
+    // === parcelas lógicas por bloque ===
     for (const b of blocks) {
       const worldX0 = grassBorder + b.x0;
       const worldY0 = grassBorder + b.y0;
@@ -334,36 +333,32 @@ export default class GameScene extends Phaser.Scene {
       this.parcelaByBlockId.set(b.id, parcela);
       this.blockIdByParcelaId.set(parcela.id, b.id);
 
-      // sprite “representante” (cualquiera del bloque; cojo el central si existe)
       const list = this.spritesByBlockId.get(b.id) || [];
       const rep  = list.length ? list[(list.length/2)|0] : null;
       if (rep) this.spriteByParcela.set(parcela.id, rep);
     }
-    
-    this.decorEntries = [];  // limpia o crea
 
-    // ======= DECOR: granero, silo, árboles, rocas, arbustos, tractor =======
-    const occ = makeOcc(TOTAL_W, TOTAL_H);
     this.decorEntries = [];
+
+    // ======= DECOR =======
+    const occ = makeOcc(TOTAL_W, TOTAL_H);
     const addEntry = (e) => { if (e?.sprite && e?.shadow) this.decorEntries.push({sprite:e.sprite, shadow:e.shadow}); };
 
-    // GRANERO
+    // Granero
     {
       const gx = Math.max(0, Math.floor(grassBorder / 2));
       const gy = Math.max(0, Math.floor((TOTAL_H - 2) / 2));
       const e  = place(this, isoProject, occ, world, gx, gy, 'barn', { projW: PROJ_W });
       addEntry(e);
     }
-
-    // SILO
+    // Silo
     {
       const gx = Math.min(TOTAL_W - 2, TOTAL_W - Math.ceil(grassBorder / 2) - 2);
       const gy = Math.max(0, Math.floor((TOTAL_H - 2) / 2) - 2);
       const e  = place(this, isoProject, occ, world, gx, gy, 'silo', { projW: PROJ_W });
       addEntry(e);
     }
-
-    // TRACTOR
+    // Tractor
     {
       const block = (blocks && blocks[0]) ? blocks[0] : null;
       const gx = block ? (grassBorder + block.x0 + block.w - 1) : (FARM_MIN_X + 1);
@@ -372,17 +367,13 @@ export default class GameScene extends Phaser.Scene {
       addEntry(e);
     }
 
-    // ====== ÁRBOLES + BOSQUE ======
-    const TREE_KEYS = ['tree', 'tree2']; // usa defs de decor.js
+    // BOSQUE/ÁRBOLES densos en bordes + parches
+    const TREE_KEYS = ['tree', 'tree2'];
     const BUSH_KEYS = ['bush1', 'bush2'];
-
     const rand = Phaser.Utils.Array.GetRandom;
 
-    // perímetro más denso (cada 2 celdas con jitter)
     const plantBorder = (step=2, jitter=0.8) => {
       const j = v => v + Phaser.Math.FloatBetween(-jitter, jitter);
-
-      // top/bottom
       for (let x = 1; x < TOTAL_W - 1; x += step) {
         const gx1 = Math.round(j(x));
         const gyT = Math.max(0, FARM_MIN_Y - 2);
@@ -390,7 +381,6 @@ export default class GameScene extends Phaser.Scene {
         if (world[gyT][gx1] === T.GRASS) addEntry(place(this, isoProject, occ, world, gx1, gyT, rand(TREE_KEYS), { projW: PROJ_W }));
         if (world[gyB][gx1] === T.GRASS) addEntry(place(this, isoProject, occ, world, gx1, gyB, rand(TREE_KEYS), { projW: PROJ_W }));
       }
-      // left/right
       for (let y = 1; y < TOTAL_H - 1; y += step) {
         const gy1 = Math.round(j(y));
         const gxL = Math.max(0, FARM_MIN_X - 2);
@@ -400,7 +390,6 @@ export default class GameScene extends Phaser.Scene {
       }
     };
 
-    // parches tipo “bosque”
     const plantPatch = ({ cx, cy, radius=6, density=0.85, bushRatio=0.25 }) => {
       const area = Math.PI * radius * radius;
       const count = Math.floor(area * density * 0.45);
@@ -415,14 +404,11 @@ export default class GameScene extends Phaser.Scene {
       }
     };
 
-    // ejecuta
     plantBorder(2, 0.8);
-    // 2–3 parches grandes en bordes largos (no invaden parcelas)
     plantPatch({ cx: Math.floor(TOTAL_W*0.22), cy: Math.floor(TOTAL_H*0.25), radius: 5, density: 0.9 });
     plantPatch({ cx: Math.floor(TOTAL_W*0.80), cy: Math.floor(TOTAL_H*0.70), radius: 6, density: 0.85 });
 
-
-    // ROCAS
+    // Rocas
     {
       const tries = 25;
       for (let i = 0; i < tries; i++) {
@@ -431,24 +417,20 @@ export default class GameScene extends Phaser.Scene {
         if (world[gy][gx] !== T.GRASS) continue;
         const name = (Math.random() < 0.5) ? 'rock1' : 'rock2';
         const e = place(this, isoProject, occ, world, gx, gy, name);
-        if (e) {
-          addEntry(e);
-          occupyRect(occ, gx - 1, gy - 1, 3, 3);
-        }
+        if (e) { addEntry(e); occupyRect(occ, gx - 1, gy - 1, 3, 3); }
       }
     }
 
-    // ARBUSTOS (clusters)
+    // Arbustos (clusters)
     {
-      const BUSH_KEYS = ['bush1', 'bush2'];
-      const cluster = (cx, cy, radius = 2, count = 6) => { // subí count para más densidad
+      const cluster = (cx, cy, radius = 2, count = 6) => {
         for (let i = 0; i < count; i++) {
           const dx = Phaser.Math.Between(-radius, radius);
           const dy = Phaser.Math.Between(-radius, radius);
           const gx = Phaser.Math.Clamp(cx + dx, 0, TOTAL_W - 1);
           const gy = Phaser.Math.Clamp(cy + dy, 0, TOTAL_H - 1);
           if (world[gy][gx] !== T.GRASS) continue;
-          const e = place(this, isoProject, occ, world, gx, gy, Phaser.Utils.Array.GetRandom(BUSH_KEYS));
+          const e = place(this, isoProject, occ, world, gx, gy, Phaser.Utils.Array.GetRandom(['bush1','bush2']));
           addEntry(e);
         }
       };
@@ -458,29 +440,25 @@ export default class GameScene extends Phaser.Scene {
       cluster(TOTAL_W - Math.floor(grassBorder / 2) - 1, TOTAL_H - Math.floor(grassBorder / 2) - 1);
     }
 
-    // Fondo verde del canvas (por si el rectángulo se sale del viewport)
-    this.cameras.main.setBackgroundColor(0x859e70);
-
-    // Calcula el rectángulo ISO que envuelve todo el mapa para centrar el "ground"
+    // Fondo verde amplio bajo todo
     const tlIso = isoProject(0, TOTAL_H - 1, this.offX, this.offY);
     const brIso = isoProject(TOTAL_W - 1, 0, this.offX, this.offY);
     const centerX = (tlIso.sx + brIso.sx) / 2;
     const centerY = (tlIso.sy + brIso.sy) / 2;
     const mapWpx  = Math.abs(brIso.sx - tlIso.sx);
     const mapHpx  = Math.abs(brIso.sy - tlIso.sy);
-
-    // “suelo” enorme bajo todo (4× el mapa para cubrir siempre)
     if (this.ground) this.ground.destroy();
     this.ground = this.add.rectangle(centerX, centerY, mapWpx*4, mapHpx*4, 0x859e70)
       .setDepth(-1_000_000);
 
-    // Overlay ambiental (se redimensiona en update)
+    // Overlay ambiental
     if (!this.ambient) {
       this.ambient = this.add.rectangle(0, 0, 10, 10, 0x000000, 0)
         .setOrigin(0)
         .setDepth(1e9);
     }
-    // ===== Límites de cámara =====
+
+    // Límites/zoom de cámara
     const tl = isoProject(0, TOTAL_H - 1, this.offX, this.offY);
     const br = isoProject(TOTAL_W - 1, 0, this.offX, this.offY);
     const minX = Math.min(tl.sx, br.sx), maxX = Math.max(tl.sx, br.sx);
@@ -496,12 +474,11 @@ export default class GameScene extends Phaser.Scene {
     const padWorld  = Math.max(padWorldX, padWorldY);
 
     this.cameras.main.setBounds(minX - padWorld, minY - padWorld, mapW + padWorld * 2, mapH + padWorld * 2);
-    // Usa un zoom inicial más cercano (≈35% más cerca, con tope 1.6)
-    const initialZoom = Math.min(zoom * 1.35, 1.6);
+    const initialZoom = Math.min(zoom * 1.35, 1.6); // más cerca que antes
     this.cameras.main.setZoom(initialZoom);
     this.cameras.main.centerOn((minX + maxX) / 2, (minY + maxY) / 2);
 
-    // ===== Clima demo =====
+    // Evento climático demo
     Factory.createEventoClimatico({
       tipo: EVENTOS_TIPO.SEQUIA,
       intensidad: NIVELES.INTENSIDAD.MEDIA,
@@ -511,12 +488,17 @@ export default class GameScene extends Phaser.Scene {
 
     // ===== Inputs =====
     this.cursors = this.input.keyboard.createCursorKeys();
-    this.keyA = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
-    this.keyW = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W);
-    this.keyD = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
-    this.keyS = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
-    this.keyX = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
+    this.keyA = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A); // ARAR
+    this.keyW = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W); // REGAR
+    this.keyD = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C); // COSECHAR (tu mapping original)
+    this.keyS = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S); // SELL HARVEST
+    this.keyX = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q); // TECH TREE
 
+    // HUD breve (texto traducible)
+    this.add.text(16, 8,
+      t('game.hudShortcuts'),
+      { fontFamily:'ui-sans-serif, system-ui, sans-serif', fontSize:'14px', color:'#e2e8f0' }
+    ).setScrollFactor(0);
 
     // Pan/Zoom
     this.input.mouse.disableContextMenu();
@@ -536,7 +518,7 @@ export default class GameScene extends Phaser.Scene {
       last = { x: p.x, y: p.y };
     });
 
-    // Bridge UI → GameScene (acciones por evento)
+    // Bridge UI → GameScene
     this._onUIAction = ({ actionType }) => {
       switch (actionType) {
         case 'ARAR': return this.plowSelected();
@@ -563,7 +545,6 @@ export default class GameScene extends Phaser.Scene {
 
     this.selectedParcelaId = parcela.id;
 
-    // datos para el panel
     const p = repoGet('parcelas', parcela.id);
     const c = p?.cultivoId ? repoGet('cultivos', p.cultivoId) : null;
     const agua = p?.recursos.map(rid => repoGet('recursos', rid)).find(r => r?.tipo === 'AGUA');
@@ -575,10 +556,8 @@ export default class GameScene extends Phaser.Scene {
       agua: agua ? { nivel: Number(agua.nivel).toFixed(2) } : null
     });
 
-    // Dibuja de inmediato el contorno del BLOQUE 9×9 completo
     this.drawBlockSelector(blockId);
   }
-
 
   drawBlockSelector(blockId){
     const parcela = this.parcelaByBlockId.get(blockId);
@@ -587,14 +566,13 @@ export default class GameScene extends Phaser.Scene {
     const g = this.selector || (this.selector = this.add.graphics());
     g.clear().lineStyle(2, 0x60a5fa, 1);
 
-    const x0 = parcela.x, y0 = parcela.y;           // en coords mundo (grid)
+    const x0 = parcela.x, y0 = parcela.y;
     const w  = parcela.w, h  = parcela.h;
 
-    // esquinas del bloque (grid → pantalla)
-    const a = isoProject(x0,     y0,     this.offX, this.offY); // top
-    const b = isoProject(x0+w,   y0,     this.offX, this.offY); // right
-    const c = isoProject(x0+w,   y0+h,   this.offX, this.offY); // bottom
-    const d = isoProject(x0,     y0+h,   this.offX, this.offY); // left
+    const a = isoProject(x0,     y0,     this.offX, this.offY);
+    const b = isoProject(x0+w,   y0,     this.offX, this.offY);
+    const c = isoProject(x0+w,   y0+h,   this.offX, this.offY);
+    const d = isoProject(x0,     y0+h,   this.offX, this.offY);
 
     const sy = Math.max(a.sy, b.sy, c.sy, d.sy);
     g.setDepth(sy + 9999);
@@ -610,11 +588,14 @@ export default class GameScene extends Phaser.Scene {
     const p = repoGet('parcelas', this.selectedParcelaId);
     if (!p) return;
 
-    if (p.arada) { this.game.events.emit('toast',{type:'info', msg:`${p.id} ya está arada.`}); return; }
+    if (p.arada) {
+      this.game.events.emit('toast',{type:'info', msg: t('game.toasts.parcelAlreadyPlowed', { parcel: p.id })});
+      return;
+    }
     p.arada = true;
     applyBlockVisual(this, p.id);
-    this.game.events.emit('toast', { type:'ok', msg:`Araste ${p.id}.` });
-    // redibuja selector
+    this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.plowSuccess', { parcel: p.id }) });
+
     const blockId = this.blockIdByParcelaId.get(p.id);
     if (blockId) this.drawBlockSelector(blockId);
   }
@@ -631,7 +612,7 @@ export default class GameScene extends Phaser.Scene {
 
     const player = findFirstPlayer();
     if (!spend(player, 10)) {
-      this.game.events.emit('toast', { type:'warn', msg:'Fondos insuficientes (10).' });
+      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.insufficientFunds', { amount: 10 }) });
       return;
     }
 
@@ -639,7 +620,10 @@ export default class GameScene extends Phaser.Scene {
       .map(rid => repoGet('recursos', rid))
       .find(r => r && r.tipo === 'AGUA');
 
-    if (!agua) { this.game.events.emit('toast',{type:'warn',msg:`La parcela ${p.id} no tiene AGUA.`}); return; }
+    if (!agua) {
+      this.game.events.emit('toast',{type:'warn',msg: t('game.toasts.noWater', { parcel: p.id })});
+      return;
+    }
 
     agua.nivel = Math.min(1, (agua.nivel ?? 0) + 0.25);
 
@@ -649,9 +633,8 @@ export default class GameScene extends Phaser.Scene {
       : State.clock + WET_DURATION;
 
     applyBlockVisual(this, p.id);
-    this.game.events.emit('toast', { type:'ok', msg:`Riego aplicado a ${p.id}.` });
+    this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.waterSuccess', { parcel: p.id }) });
 
-    // limpia alertas y refresca panel
     repoAll('alertas').forEach(a => { if (a.parcelaId === p.id) a.visible = false; });
     const blockId = this.blockIdByParcelaId.get(p.id);
     if (blockId) this.drawBlockSelector(blockId);
@@ -662,20 +645,21 @@ export default class GameScene extends Phaser.Scene {
     const p = repoGet('parcelas', this.selectedParcelaId);
     const c = p?.cultivoId ? repoGet('cultivos', p.cultivoId) : null;
     const player = findFirstPlayer();
+
     if(c?.etapa==='COSECHA' && c.progreso>=1){
       player.cartera += 30;
       c.etapa='SIEMBRA'; c.progreso=0;
-      this.game.events.emit('toast', { type:'ok', msg:`Cosechado ${c.tipo} en ${p.id}. +30` });
+      this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.harvestSuccessSimple', { amount: 30, parcel: p.id }) });
       const blockId = this.blockIdByParcelaId.get(p.id);
       if (blockId) this.drawBlockSelector(blockId);
     } else {
-      this.game.events.emit('toast', { type:'warn', msg:'Aún no está listo.' });
+      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.cropNotReady') });
     }
   }
 
   async plantSelected() {
     if (!this.selectedParcelaId) {
-      this.game.events.emit('toast', { type:'warn', msg:'Selecciona una parcela primero.' });
+      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.selectParcelFirst') });
       return;
     }
     const p = repoGet('parcelas', this.selectedParcelaId);
@@ -683,13 +667,13 @@ export default class GameScene extends Phaser.Scene {
 
     if (p.cultivoId) {
       const c = repoGet('cultivos', p.cultivoId);
-      this.game.events.emit('toast', { type:'info', msg:`${p.id} ya tiene ${c?.tipo || 'cultivo'}.` });
+      this.game.events.emit('toast', { type:'info', msg: t('game.toasts.parcelAlreadyPlanted', { parcel: p.id, crop: c?.tipo || t('game.toasts.genericCropName') }) });
       return;
     }
 
     const player = findFirstPlayer();
     if (!spend(player, 15)) {
-      this.game.events.emit('toast', { type:'warn', msg:'Fondos insuficientes (15).' });
+      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.insufficientFunds', { amount: 15 }) });
       return;
     }
 
@@ -701,18 +685,18 @@ export default class GameScene extends Phaser.Scene {
     });
     p.cultivoId = cultivo.id;
 
-    this.game.events.emit('toast', { type:'ok', msg:`Sembraste ${cultivo.tipo} en ${p.id}.` });
+    this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.plantSuccess', { crop: 'MAIZ', parcel: p.id }) });
     const blockId = this.blockIdByParcelaId.get(p.id);
     if (blockId) this.drawBlockSelector(blockId);
   }
 
   openTechTree() {
-    this.game.events.emit('toast', { type:'ok', msg:'Tech Tree (WIP): Riego por goteo, sensores, energía solar…' });
+    this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.techTree') });
   }
 
   scanRegion() {
     if (!this.selectedParcelaId) {
-      this.game.events.emit('toast', { type:'warn', msg:'Selecciona una parcela para escanear.' });
+      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.selectParcelForScan') });
       return;
     }
     const p = repoGet('parcelas', this.selectedParcelaId);
@@ -723,11 +707,11 @@ export default class GameScene extends Phaser.Scene {
     const ndvi     = Number(p.saludSuelo ?? 0.5);
     const heat     = Phaser.Math.Clamp(Math.random()*0.6, 0, 1);
 
-    const msg =
-      `🛰️ Scan NASA\n` +
-      `• SMAP (RZSM): ${(smapRZSM*100).toFixed(0)}%\n` +
-      `• NDVI (salud): ${(ndvi*100).toFixed(0)}%\n` +
-      `• Heat stress: ${(heat*100).toFixed(0)}%`;
+    const msg = t('game.toasts.scanSummary', {
+      smap: (smapRZSM*100).toFixed(0),
+      ndvi: (ndvi*100).toFixed(0),
+      heat: (heat*100).toFixed(0),
+    });
     this.game.events.emit('toast', { type:'ok', msg });
   }
 
@@ -745,27 +729,25 @@ export default class GameScene extends Phaser.Scene {
     const player = findFirstPlayer();
     if (total > 0) {
       player.cartera = (player.cartera || 0) + total;
-      this.game.events.emit('toast', { type:'ok', msg:`Venta realizada: +${total}` });
+      this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.sellSuccessSimple', { amount: total }) });
     } else {
-      this.game.events.emit('toast', { type:'warn', msg:'No hay cosechas listas.' });
+      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.noHarvestReady') });
     }
   }
-  
 
   update(_, delta) {
-    // 1) Ajusta overlay al viewport de la cámara (independiente de zoom/scroll)
+    // 1) Ajusta overlay al viewport
     if (this.ambient) {
       const cam = this.cameras.main;
-      // worldView ya viene compensado por zoom y scroll
       this.ambient.setPosition(cam.worldView.x, cam.worldView.y);
       this.ambient.setSize(cam.worldView.width, cam.worldView.height);
     }
 
-    // 2) Avanza la simulación temporal antes de derivar efectos visuales
+    // 2) Avanza simulación temporal antes de efectos visuales
     State.clock += 1;
     tickSim(delta);
 
-    // 3) Día/tarde/noche + sombras basados en TimeState
+    // 3) Día/tarde/noche + sombras (sincronizado con simulación)
     this.tickDayNight();
 
     // 4) Cooldowns
@@ -783,7 +765,7 @@ export default class GameScene extends Phaser.Scene {
     if (this.cursors?.up.isDown)    cam.scrollY -= v * dt;
     if (this.cursors?.down.isDown)  cam.scrollY += v * dt;
 
-    // 6) Atajos
+    // 6) Atajos (mismos que tu primer archivo)
     if (Phaser.Input.Keyboard.JustDown(this.keyA)) this.plowSelected();
     if (Phaser.Input.Keyboard.JustDown(this.keyW)) this.waterSelected();
     if (Phaser.Input.Keyboard.JustDown(this.keyD)) this.harvestSelected();
@@ -791,7 +773,13 @@ export default class GameScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.keyX)) this.openTechTree();
 
     // 7) Simulación
-    tickClimate(); tickCrops(); tickPlagues(); tickAlerts();
+    const dayN = getSimDayNumber();
+    if (dayN !== _lastDay) {
+      _lastDay = dayN;
+      // Alinea el clima al día simulado
+      tickClimate({ regionCode: State.region?.codigo, dayIndex: dayN });
+    }
+    tickCrops(); tickPlagues(); tickAlerts();
 
     // 8) Secado periódico
     if ((State.clock % 15) === 0) {
@@ -811,28 +799,28 @@ export default class GameScene extends Phaser.Scene {
       this.timeOfDay = tSim;
     }
 
-    // ===== Fases (tu lógica)
+    // ===== Fases
     const t = this.timeOfDay;
-    let ambient = 0.0;  // 0 = claro, 1 = oscuro
-    let sunAlt  = 0.0;  // 0 = bajo (sombras largas), 1 = alto (cortas)
-    let sunAzim = 0.0;  // 0=este→, 0.5=oeste←
+    let ambient = 0.0;
+    let sunAlt  = 0.0;
+    let sunAzim = 0.0;
 
-    if (t < 0.15) {                // amanecer
+    if (t < 0.15) {
       const u = smoothstep(t / 0.15);
       ambient = 0.85 - 0.55*u;
       sunAlt  = 0.15 + 0.65*u;
       sunAzim = 0.15;
-    } else if (t < 0.75) {         // día
+    } else if (t < 0.75) {
       const u = (t - 0.15) / 0.60;
       ambient = 0.30 - 0.10*Math.cos(Math.PI*u);
       sunAlt  = 0.80 + 0.15*Math.cos(Math.PI*u);
       sunAzim = 0.25 + 0.50*u;
-    } else if (t < 0.90) {         // atardecer
+    } else if (t < 0.90) {
       const u = smoothstep((t - 0.75) / 0.15);
       ambient = 0.30 + 0.40*u;
       sunAlt  = 0.60 - 0.45*u;
       sunAzim = 0.75;
-    } else {                       // noche
+    } else {
       const u = (t - 0.90) / 0.10;
       ambient = 0.70 + 0.20*u;
       sunAlt  = 0.10;
@@ -842,24 +830,24 @@ export default class GameScene extends Phaser.Scene {
     // ===== Dirección del sol (pantalla isométrica)
     const angle = sunAzim * Math.PI;
     const dirX  = Math.cos(angle);
-    const dirY  = Math.sin(angle) * 0.6; // iso
+    const dirY  = Math.sin(angle) * 0.6;
 
     // ===== Geometría/alpha de sombras según altura del sol
     const sunK   = Phaser.Math.Clamp(sunAlt, 0, 1);
-    const len    = Phaser.Math.Linear(1.8, 0.6, sunK);  // más largas con sol bajo
-    const alphaK = Phaser.Math.Linear(1.2, 0.6, sunK); // más opacas con sol bajo
-    const squish = Phaser.Math.Linear(1.0, 0.75, sunK); // más aplastadas con sol alto
-    const blurK  = Phaser.Math.Linear(1.4, 0.9, sunK); // más anchas (difusas) con sol bajo
+    const len    = Phaser.Math.Linear(1.8, 0.6, sunK);
+    const alphaK = Phaser.Math.Linear(1.2, 0.6, sunK);
+    const squish = Phaser.Math.Linear(1.0, 0.75, sunK);
+    const blurK  = Phaser.Math.Linear(1.4, 0.9, sunK);
 
-    // ===== Tinte ambiental (interpolación suave)
+    // ===== Tinte ambiental
     if (this.ambient) {
       const clamp01 = (v) => Phaser.Math.Clamp(v, 0, 1);
       const a = clamp01(ambient);
 
       const COL_DAY   = 0xffffff;
-      const COL_DAWN  = 0xffc288; // naranja suave
-      const COL_DUSK  = 0xff9a3c; // naranja intenso
-      const COL_NIGHT = 0x0a0f3a; // azul noche
+      const COL_DAWN  = 0xffc288;
+      const COL_DUSK  = 0xff9a3c;
+      const COL_NIGHT = 0x0a0f3a;
 
       const smooth = (x)=> x*x*(3-2*x);
       const lerpColor = (c1, c2, k) => {
@@ -873,19 +861,19 @@ export default class GameScene extends Phaser.Scene {
 
       let color = COL_DAY, alpha = 0;
 
-      if (t < 0.15) {                   // noche → amanecer
+      if (t < 0.15) {
         const k = smooth(t / 0.15);
         color = lerpColor(COL_NIGHT, COL_DAWN, k);
         alpha = Phaser.Math.Linear(0.65, 0.10, k);
-      } else if (t < 0.50) {            // amanecer → día
+      } else if (t < 0.50) {
         const k = smooth((t - 0.15) / 0.35);
         color = lerpColor(COL_DAWN, COL_DAY, k);
         alpha = Phaser.Math.Linear(0.10, 0.00, k);
-      } else if (t < 0.75) {            // día → atardecer
+      } else if (t < 0.75) {
         const k = smooth((t - 0.50) / 0.25);
         color = lerpColor(COL_DAY, COL_DUSK, k);
         alpha = Phaser.Math.Linear(0.00, 0.28, k);
-      } else {                          // atardecer → noche
+      } else {
         const k = smooth((t - 0.75) / 0.25);
         color = lerpColor(COL_DUSK, COL_NIGHT, k);
         alpha = Phaser.Math.Linear(0.28, 0.65, k);
@@ -894,21 +882,17 @@ export default class GameScene extends Phaser.Scene {
       this.ambient.setFillStyle(color, Phaser.Math.Clamp(alpha, 0, 1));
     }
 
-    // ===== Actualiza TODAS las sombras de decor
+    // ===== Sombras de decor (ancladas y desvanecidas de noche)
     if (this.decorEntries && this.decorEntries.length) {
+      const lightK = Phaser.Math.Clamp((sunAlt - 0.12) / 0.28, 0, 1);
+      const angle = sunAzim * Math.PI;
+      const dirX  = Math.cos(angle);
+      const dirY  = Math.sin(angle) * 0.6;
 
-      // luz “directa” (casi 0 de noche; sube al amanecer)
-      // pone 0 cuando el sol está muy bajo
-      const sunK   = Phaser.Math.Clamp(sunAlt, 0, 1);
-      const lightK = Phaser.Math.Clamp((sunAlt - 0.12) / 0.28, 0, 1); // 0 si sol < ~0.12, 1 desde ~0.40
       const len    = Phaser.Math.Linear(1.8, 0.6, sunK);
       const alphaK = Phaser.Math.Linear(1.15, 0.55, sunK);
       const squish = Phaser.Math.Linear(1.0, 0.75, sunK);
       const blurK  = Phaser.Math.Linear(1.35, 0.95, sunK);
-
-      const angle = sunAzim * Math.PI;
-      const dirX  = Math.cos(angle);
-      const dirY  = Math.sin(angle) * 0.6; // iso
 
       for (const e of this.decorEntries) {
         if (!e?.sprite || !e?.shadow) continue;
@@ -917,39 +901,27 @@ export default class GameScene extends Phaser.Scene {
         const name = e.sprite.getData('decor')?.name || '';
         const isBuilding = (name === 'barn' || name === 'silo');
 
-        // --- POSICIÓN ---
-        // X siempre acompaña la dirección del sol
+        // posición
         const sx = e.sprite.x + (base.dx * len * dirX);
-
-        // Y: para edificios, pegamos la sombra al borde inferior del sprite
-        // (origin 0.5,1 => sprite.y ya es la base); reducimos el “rebote”.
         const sy = isBuilding
-          ? (e.sprite.y - 1 + base.dy * 0.2)                 // pegue al piso
+          ? (e.sprite.y - 1 + base.dy * 0.2)
           : (e.sprite.y + (base.dy * len * (0.6 + 0.4*dirY)));
-
         e.shadow.setPosition(sx, sy);
 
-        // --- TAMAÑO (difuso al amanecer/atardecer)
+        // tamaño
         const widen   = isBuilding ? 1.30 : 1.00;
         const flatten = isBuilding ? 0.90 : 1.00;
-
         e.shadow.setDisplaySize(
           base.w * len * blurK * widen,
           base.h * squish * blurK * flatten
         );
 
-        // --- OPACIDAD ---
-        // De noche (lightK≈0) casi desaparece; de día vuelve.
-        // Edificios un pelín más marcada para “anclar” visualmente.
+        // opacidad (casi 0 en noche)
         const baseA   = base.alpha ?? 0.25;
         const anchorA = isBuilding ? 1.05 : 1.00;
-        const nightFade = lightK * lightK; // caída más rápida al anochecer
-
+        const nightFade = lightK * lightK;
         e.shadow.setAlpha(baseA * alphaK * anchorA * nightFade);
       }
     }
-
   }
-
-
 }
