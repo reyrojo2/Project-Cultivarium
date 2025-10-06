@@ -17,6 +17,7 @@ export default class UIScene extends Phaser.Scene {
     this.alertsText = null;
     this.dayText = null;
     this.playerNameText = null;
+    this.levelText = null;
     this.heatAlertTween = null; // Control del Tween
     this._dom = null;        // refs DOM cacheadas
     this._domLast = null;    // último snapshot para evitar trabajo repetido
@@ -117,8 +118,33 @@ export default class UIScene extends Phaser.Scene {
       side === 'left' ? '◀' : '▶',
       { fontSize: '32px', color: colors.textPrimary, fontStyle: 'bold' }
     ).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    toggleButton.setDepth(1);
 
-    container.add([panelBg, toggleButton]);
+    const maskShape = this.add.graphics();
+    maskShape.fillStyle(0xffffff, 1);
+    maskShape.fillRect(0, 0, width, height);
+    maskShape.setVisible(false);
+
+    const content = this.add.container(0, 0);
+
+    container.add([panelBg, maskShape, content, toggleButton]);
+
+    container.setSize(width, height);
+    container.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
+
+    const geometryMask = maskShape.createGeometryMask();
+    content.setMask(geometryMask);
+
+    const panelState = { maxScroll: 0 };
+
+    container.on('wheel', (pointer, deltaX, deltaY, deltaZ, event) => {
+      if (panelState.maxScroll <= 0) return;
+      const nextY = Phaser.Math.Clamp(content.y - deltaY, -panelState.maxScroll, 0);
+      if (nextY !== content.y) {
+        content.y = nextY;
+      }
+      if (event?.preventDefault) event.preventDefault();
+    });
 
     let isCollapsed = false;
     toggleButton.on('pointerdown', () => {
@@ -132,18 +158,27 @@ export default class UIScene extends Phaser.Scene {
       toggleButton.setText(isCollapsed ? (side === 'left' ? '▶' : '◀') : (side === 'left' ? '◀' : '▶'));
     });
 
-    return { container, width, height, side };
+    return {
+      container,
+      content,
+      width,
+      height,
+      side,
+      setMaxScroll: (value) => {
+        panelState.maxScroll = Math.max(0, value);
+      }
+    };
   }
 
   // ---------- Status/Data + Inspección + Alertas ----------
   populateStatusPanel(panel, colors) {
-    const container = panel.container;
+    const container = panel.content;
     const W = panel.width;
     let y = 20;
 
     // Nombre / Ubicación
     this.playerNameText = this.add.text(W / 2, y, '', { fontSize: '24px', color: colors.textPrimary, fontStyle: 'bold' }).setOrigin(0.5, 0);
-    this.locationText = this.add.text(W / 2, y += 30, '', { fontSize: '16px', color: colors.textSecondary }).setOrigin(0.5, 0);
+    this.levelText = this.add.text(W / 2, y += 30, '', { fontSize: '16px', color: colors.textSecondary }).setOrigin(0.5, 0);
 
     // Día destacado (Aplica colores Data Accent)
     this.dayText = this.add.text(W / 2, y += 30, '', {
@@ -194,7 +229,7 @@ export default class UIScene extends Phaser.Scene {
     this.inspectTitle = this.add.text(24, y, '', { fontSize: '18px', color: colors.dataAccent, fontStyle: 'bold' });
     this.inspectText = this.add.text(24, y + 24, '', { fontSize: '12px', color: colors.textSecondary, wordWrap: { width: W - 48 } });
 
-    container.add([this.playerNameText, this.locationText, this.dayText, this.inspectTitle, this.inspectText]);
+    container.add([this.playerNameText, this.levelText, this.dayText, this.inspectTitle, this.inspectText]);
     container.bringToTop(this.dayText);
 
     const sep2 = this.add.graphics().fillStyle(colors.panelBorder, 0.5).fillRect(16, y += 110, W - 32, 2);
@@ -204,11 +239,13 @@ export default class UIScene extends Phaser.Scene {
     this.alertsTitle = this.add.text(24, y, '', { fontSize: '18px', color: colors.bar.heat, fontStyle: 'bold' });
     this.alertsText = this.add.text(24, y + 24, '', { fontSize: '12px', color: colors.textPrimary, wordWrap: { width: W - 48 } });
     container.add([this.alertsTitle, this.alertsText]);
+
+    this.updatePanelScroll(panel);
   }
 
 // ---------- Panel de Acciones ----------
 populateActionPanel(panel, colors) {
-  const container = panel.container;
+  const container = panel.content;
   const W = panel.width;
   let y = 20;
 
@@ -265,11 +302,6 @@ populateActionPanel(panel, colors) {
           this.game.events.emit('action:perform', { actionType: cfg.eventType });
         }
 
-        const feedbackText = t(`ui.actions.${cfg.key}.feedback`);
-        if (feedbackText) {
-          this.showActionFeedback(feedbackText, cfg.feedbackColor);
-        }
-
         this.tweens.add({ targets: [btn.bg, btn.text], scale: 0.96, duration: 80, yoyo: true, ease: 'Quad.easeInOut' });
 
         const prevColor = btn.bg.fillColor;
@@ -301,7 +333,29 @@ populateActionPanel(panel, colors) {
       y += 12;
     }
   });
+  this.updatePanelScroll(panel);
 }
+
+  updatePanelScroll(panel) {
+    if (!panel?.content || typeof panel.setMaxScroll !== 'function') return;
+    const bounds = panel.content.getBounds();
+    if (!bounds) {
+      panel.setMaxScroll(0);
+      panel.content.y = 0;
+      return;
+    }
+
+    const containerWorldY = panel.container?.y ?? 0;
+    const top = bounds.y - containerWorldY;
+    const bottom = (bounds.bottom ?? (bounds.y + bounds.height)) - containerWorldY;
+    const contentHeight = Math.max(bottom - Math.min(0, top), 0);
+    const maxScroll = Math.max(0, contentHeight - panel.height);
+
+    panel.setMaxScroll(maxScroll);
+
+    if (panel.content.y < -maxScroll) panel.content.y = -maxScroll;
+    if (panel.content.y > 0) panel.content.y = 0;
+  }
     
   // ---------- Feedback flotante ----------
   showActionFeedback(msg, colorHex) {
@@ -385,7 +439,7 @@ populateActionPanel(panel, colors) {
     bg.lineStyle(2, colors.panelBorder).strokeRoundedRect(0, 0, width, height, 14);
     bg.setPosition(pad, y);
 
-    const t = this.add.text(panelWidth / 2, y + height / 2, text, {
+    const labelText = this.add.text(panelWidth / 2, y + height / 2, text, {
       fontSize: '20px', color: colors.textPrimary, fontStyle: 'bold'
     }).setOrigin(0.5);
 
@@ -414,11 +468,10 @@ populateActionPanel(panel, colors) {
     // Click
     bg.on('pointerdown', () => {
       if (bg.input?.enabled) {
-        this.tweens.add({ targets: [bg, t], scale: 0.96, duration: 80, yoyo: true, ease: 'Quad.easeInOut' });
+        this.tweens.add({ targets: [bg, labelText], scale: 0.96, duration: 80, yoyo: true, ease: 'Quad.easeInOut' });
         onClick();
       } else {
         this.tweens.add({ targets: bg, x: bg.x + 5, duration: 50, yoyo: true, repeat: 1, ease: 'Sine.easeInOut' });
-        this.showActionFeedback(t('ui.actions.blocked'), this.colors.bar.heat);
       }
     });
 
@@ -426,7 +479,7 @@ populateActionPanel(panel, colors) {
     bg.on('pointerout',  () => { if (bg.input?.enabled) bg.fillColor = colors.actionButton; });
 
     // Devuelve helpers
-    return { elements: [bg, t], bg, text: t, enable, disable, hitArea };
+    return { elements: [bg, labelText], bg, text: labelText, enable, disable, hitArea };
   }
 
   formatDateForLang(date, lang = getLanguage()) {
@@ -454,9 +507,8 @@ populateActionPanel(panel, colors) {
       this.playerNameText.setText(profileName || t('ui.defaultPlayerName'));
     }
 
-    if (this.locationText) {
-      const profileLocation = window.__CV_START__?.profile?.location;
-      this.locationText.setText(profileLocation || t('ui.defaultLocation'));
+    if (this.levelText) {
+      this.levelText.setText(t('ui.levelDisplay', { level: levelName }));
     }
 
     if (this.dayText) {
@@ -465,7 +517,6 @@ populateActionPanel(panel, colors) {
 
     if (this.clockText) {
       this.clockText.setText(t('ui.clockDisplay', {
-        level: levelName,
         dayLabel,
         day: dayN,
         totalDays,
@@ -519,12 +570,16 @@ populateActionPanel(panel, colors) {
     } else if (this.inspectText) {
       this.inspectText.setText(t('ui.inspectPlaceholder'));
     }
+
+    this.updatePanelScroll(this.statusPanel);
+    this.updatePanelScroll(this.actionPanel);
   }
 
   updateInspectPanel(data) {
     if (!this.inspectText) return;
     if (!data) {
       this.inspectText.setText(t('ui.inspectPlaceholder'));
+      this.updatePanelScroll(this.statusPanel);
       return;
     }
 
@@ -562,6 +617,7 @@ populateActionPanel(panel, colors) {
     ];
 
     this.inspectText.setText(lines.join('\n'));
+    this.updatePanelScroll(this.statusPanel);
   }
 
 
@@ -650,7 +706,6 @@ populateActionPanel(panel, colors) {
 
     if (this.clockText) {
       this.clockText.setText(t('ui.clockDisplay', {
-        level: levelName,
         dayLabel,
         day: dayN,
         totalDays,
@@ -669,12 +724,19 @@ populateActionPanel(panel, colors) {
 
     if (this.playerNameText) {
       const profileName = window.__CV_START__?.profile?.name;
-      this.playerNameText.setText(profileName || t('ui.defaultPlayerName'));
+      const nextName = profileName || t('ui.defaultPlayerName');
+      if (this.playerNameText.text !== nextName) {
+        this.playerNameText.setText(nextName);
+        this.updatePanelScroll(this.statusPanel);
+      }
     }
 
-    if (this.locationText) {
-      const profileLocation = window.__CV_START__?.profile?.location;
-      this.locationText.setText(profileLocation || t('ui.defaultLocation'));
+    if (this.levelText) {
+      const nextLevel = t('ui.levelDisplay', { level: levelName });
+      if (this.levelText.text !== nextLevel) {
+        this.levelText.setText(nextLevel);
+        this.updatePanelScroll(this.statusPanel);
+      }
     }
 
     const CRITICAL_HEAT_THRESHOLD = 0.70;
