@@ -7,8 +7,6 @@ export const DECOR = {
   rock1:  { key:'Rock1',     srcW: 48, srcH: 24, footprint:{w:1,h:1}, boost:1.60, fitToFootprint:false, depthOffset:  8, shadow:{dx:10, dy: 4, w:46,  h:16, alpha:0.22} },
   rock2:  { key:'Rock2',     srcW: 48, srcH: 24, footprint:{w:1,h:1}, boost:1.60, fitToFootprint:false, depthOffset:  8, shadow:{dx:12, dy: 4, w:50,  h:18, alpha:0.22} },
   bush1:  { key:'Bush1',     srcW: 61, srcH: 55, footprint:{w:1,h:1}, boost:1.90, fitToFootprint:false, depthOffset: 12, shadow:{dx:14, dy: 6, w:70,  h:24, alpha:0.22} },
-  tree2:  { key:'Tree2',     srcW:128, srcH:128, footprint:{w:1,h:1}, boost:2.00, fitToFootprint:false, depthOffset:180, shadow:{dx:34, dy:9,  w:86,  h:30, alpha:0.30} },
-  bush2:  { key:'Bush2',     srcW: 61, srcH: 55, footprint:{w:1,h:1}, boost:1.90, fitToFootprint:false, depthOffset: 12, shadow:{dx:14, dy: 6, w:70,  h:24, alpha:0.22} },
 };
 
 // Requiere: scene.offX/offY y una función isoProject(gx,gy,offX,offY)

@@ -8,9 +8,11 @@ import { tickCrops } from '../systems/cropSystem.js';
 import { tickPlagues } from '../systems/plagueSystem.js';
 import { tickAlerts } from '../systems/alertSystem.js';
 import { findFirstPlayer, spend } from '../core/state.js';
-import { startLevel, tickSim, getSimDayProgress01 } from '../core/time.js';
+import { startLevel, tickSim, TimeState } from '../core/time.js';
 import { T, MAP_PRESETS, makePlayableMatrix, makeWorldMatrix, buildBlockIndex, buildFromPreset } from '../map/mapBuilder.js';
 import { DECOR, addDecor } from '../map/decor.js';
+import { CROP_CONFIG, isCultivoListo } from '../systems/cropSystem.js';
+import { getLanguage, setLanguage, translate as t } from '../utils/i18n.js';
 
 // === Proyección ISO 2:1 ===
 const PROJ_W = 256;
@@ -207,10 +209,8 @@ export default class GameScene extends Phaser.Scene {
     super('Game');
     this.selectedParcelaId = null;
     this.cursors = null;
-    this.keyW = null;
-    this.keyD = null;
-    this.keyS = null;
-    this.keyX = null;
+    this.keyR = null;
+    this.keyC = null;
     this.camSpeed = 400;
     this.selector = null;
     this.offX = 0; this.offY = 0;
@@ -221,15 +221,19 @@ export default class GameScene extends Phaser.Scene {
     this.keyA = null;
     this._cooldowns = { water: 0, plow: 0, harvest: 0, plant: 0 };
     this.decorEntries = [];      // ← entradas {sprite, shadow, def} de addDecor()
-    this.timeOfDay = 0.5;          // 0..1 (se sincroniza con la simulación al iniciar)
+    this.timeOfDay = 0.5;          // 0..1
+    this.dayLengthMs = 60000;   // 120 s por “día” (ajústalo)
   }
 
   create() {
+    setLanguage(window.__CV_START__?.language || getLanguage());
+
     const cam = this.cameras.main;
-    cam.setBackgroundColor(0x859e70);
+    this.ambient = this.add.rectangle(0, 0, 10, 10, 0x000000, 0)
+      .setOrigin(0)
+      .setDepth(1e9);
 
     startLevel(0);
-    this.timeOfDay = getSimDayProgress01();
     if (this.input?.setTopOnly) this.input.setTopOnly(true);
     Factory.createPlayer({ name: 'AgroPro', cartera: 200 });
     Factory.createTienda();
@@ -372,55 +376,19 @@ export default class GameScene extends Phaser.Scene {
       addEntry(e);
     }
 
-    // ====== ÁRBOLES + BOSQUE ======
-    const TREE_KEYS = ['tree', 'tree2']; // usa defs de decor.js
-    const BUSH_KEYS = ['bush1', 'bush2'];
-
-    const rand = Phaser.Utils.Array.GetRandom;
-
-    // perímetro más denso (cada 2 celdas con jitter)
-    const plantBorder = (step=2, jitter=0.8) => {
-      const j = v => v + Phaser.Math.FloatBetween(-jitter, jitter);
-
-      // top/bottom
-      for (let x = 1; x < TOTAL_W - 1; x += step) {
-        const gx1 = Math.round(j(x));
-        const gyT = Math.max(0, FARM_MIN_Y - 2);
-        const gyB = Math.min(TOTAL_H - 1, FARM_MAX_Y + 2);
-        if (world[gyT][gx1] === T.GRASS) addEntry(place(this, isoProject, occ, world, gx1, gyT, rand(TREE_KEYS), { projW: PROJ_W }));
-        if (world[gyB][gx1] === T.GRASS) addEntry(place(this, isoProject, occ, world, gx1, gyB, rand(TREE_KEYS), { projW: PROJ_W }));
-      }
-      // left/right
-      for (let y = 1; y < TOTAL_H - 1; y += step) {
-        const gy1 = Math.round(j(y));
-        const gxL = Math.max(0, FARM_MIN_X - 2);
-        const gxR = Math.min(TOTAL_W - 1, FARM_MAX_X + 2);
-        if (world[gy1][gxL] === T.GRASS) addEntry(place(this, isoProject, occ, world, gxL, gy1, rand(TREE_KEYS), { projW: PROJ_W }));
-        if (world[gy1][gxR] === T.GRASS) addEntry(place(this, isoProject, occ, world, gxR, gy1, rand(TREE_KEYS), { projW: PROJ_W }));
-      }
-    };
-
-    // parches tipo “bosque”
-    const plantPatch = ({ cx, cy, radius=6, density=0.85, bushRatio=0.25 }) => {
-      const area = Math.PI * radius * radius;
-      const count = Math.floor(area * density * 0.45);
-      for (let i = 0; i < count; i++) {
-        const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
-        const r   = Phaser.Math.FloatBetween(0, radius);
-        const gx  = Phaser.Math.Clamp(Math.round(cx + Math.cos(ang)*r + Phaser.Math.FloatBetween(-0.3,0.3)), 0, TOTAL_W-1);
-        const gy  = Phaser.Math.Clamp(Math.round(cy + Math.sin(ang)*r + Phaser.Math.FloatBetween(-0.3,0.3)), 0, TOTAL_H-1);
-        if (world[gy][gx] !== T.GRASS) continue;
-        const key = (Math.random() < bushRatio) ? rand(BUSH_KEYS) : rand(TREE_KEYS);
-        addEntry(place(this, isoProject, occ, world, gx, gy, key, { projW: PROJ_W }));
-      }
-    };
-
-    // ejecuta
-    plantBorder(2, 0.8);
-    // 2–3 parches grandes en bordes largos (no invaden parcelas)
-    plantPatch({ cx: Math.floor(TOTAL_W*0.22), cy: Math.floor(TOTAL_H*0.25), radius: 5, density: 0.9 });
-    plantPatch({ cx: Math.floor(TOTAL_W*0.80), cy: Math.floor(TOTAL_H*0.70), radius: 6, density: 0.85 });
-
+    // ÁRBOLES
+    {
+      const tryPlaceTreeRow = (gyRow) => {
+        for (let gx = 1; gx < TOTAL_W - 1; gx += 4) {
+          if (world[gyRow][gx] === T.GRASS) {
+            const e = place(this, isoProject, occ, world, gx, gyRow, 'tree', { projW: PROJ_W });
+            addEntry(e);
+          }
+        }
+      };
+      tryPlaceTreeRow(FARM_MIN_Y - 2 >= 0 ? FARM_MIN_Y - 2 : 0);
+      tryPlaceTreeRow(Math.min(TOTAL_H - 1, FARM_MAX_Y + 2));
+    }
 
     // ROCAS
     {
@@ -440,15 +408,14 @@ export default class GameScene extends Phaser.Scene {
 
     // ARBUSTOS (clusters)
     {
-      const BUSH_KEYS = ['bush1', 'bush2'];
-      const cluster = (cx, cy, radius = 2, count = 6) => { // subí count para más densidad
+      const cluster = (cx, cy, radius = 2, count = 4) => {
         for (let i = 0; i < count; i++) {
           const dx = Phaser.Math.Between(-radius, radius);
           const dy = Phaser.Math.Between(-radius, radius);
           const gx = Phaser.Math.Clamp(cx + dx, 0, TOTAL_W - 1);
           const gy = Phaser.Math.Clamp(cy + dy, 0, TOTAL_H - 1);
           if (world[gy][gx] !== T.GRASS) continue;
-          const e = place(this, isoProject, occ, world, gx, gy, Phaser.Utils.Array.GetRandom(BUSH_KEYS));
+          const e = place(this, isoProject, occ, world, gx, gy, 'bush1');
           addEntry(e);
         }
       };
@@ -458,35 +425,16 @@ export default class GameScene extends Phaser.Scene {
       cluster(TOTAL_W - Math.floor(grassBorder / 2) - 1, TOTAL_H - Math.floor(grassBorder / 2) - 1);
     }
 
-    // Fondo verde del canvas (por si el rectángulo se sale del viewport)
-    this.cameras.main.setBackgroundColor(0x859e70);
 
-    // Calcula el rectángulo ISO que envuelve todo el mapa para centrar el "ground"
-    const tlIso = isoProject(0, TOTAL_H - 1, this.offX, this.offY);
-    const brIso = isoProject(TOTAL_W - 1, 0, this.offX, this.offY);
-    const centerX = (tlIso.sx + brIso.sx) / 2;
-    const centerY = (tlIso.sy + brIso.sy) / 2;
-    const mapWpx  = Math.abs(brIso.sx - tlIso.sx);
-    const mapHpx  = Math.abs(brIso.sy - tlIso.sy);
 
-    // “suelo” enorme bajo todo (4× el mapa para cubrir siempre)
-    if (this.ground) this.ground.destroy();
-    this.ground = this.add.rectangle(centerX, centerY, mapWpx*4, mapHpx*4, 0x859e70)
-      .setDepth(-1_000_000);
 
-    // Overlay ambiental (se redimensiona en update)
-    if (!this.ambient) {
-      this.ambient = this.add.rectangle(0, 0, 10, 10, 0x000000, 0)
-        .setOrigin(0)
-        .setDepth(1e9);
-    }
     // ===== Límites de cámara =====
     const tl = isoProject(0, TOTAL_H - 1, this.offX, this.offY);
     const br = isoProject(TOTAL_W - 1, 0, this.offX, this.offY);
     const minX = Math.min(tl.sx, br.sx), maxX = Math.max(tl.sx, br.sx);
     const minY = Math.min(tl.sy, br.sy), maxY = Math.max(tl.sy, br.sy);
 
-    const vw = this.scale.width, vh = this.scale.height, padFit = 50;
+    const vw = this.scale.width, vh = this.scale.height, padFit = 80;
     const mapW = maxX - minX, mapH = maxY - minY;
     const zoomX = (vw - padFit * 2) / mapW;
     const zoomY = (vh - padFit * 2) / mapH;
@@ -496,9 +444,7 @@ export default class GameScene extends Phaser.Scene {
     const padWorld  = Math.max(padWorldX, padWorldY);
 
     this.cameras.main.setBounds(minX - padWorld, minY - padWorld, mapW + padWorld * 2, mapH + padWorld * 2);
-    // Usa un zoom inicial más cercano (≈35% más cerca, con tope 1.6)
-    const initialZoom = Math.min(zoom * 1.35, 1.6);
-    this.cameras.main.setZoom(initialZoom);
+    this.cameras.main.setZoom(zoom);
     this.cameras.main.centerOn((minX + maxX) / 2, (minY + maxY) / 2);
 
     // ===== Clima demo =====
@@ -512,18 +458,20 @@ export default class GameScene extends Phaser.Scene {
     // ===== Inputs =====
     this.cursors = this.input.keyboard.createCursorKeys();
     this.keyA = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
-    this.keyW = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W);
-    this.keyD = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
-    this.keyS = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
-    this.keyX = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
+    this.keyR = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
+    this.keyC = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
 
+    // HUD breve
+    this.add.text(16, 8,
+      t('game.hudShortcuts'),
+      { fontFamily:'ui-sans-serif, system-ui, sans-serif', fontSize:'14px', color:'#e2e8f0' }
+    ).setScrollFactor(0);
 
     // Pan/Zoom
     this.input.mouse.disableContextMenu();
     this.input.on('wheel', (_p, _o, _dx, dy) => {
       const cam = this.cameras.main;
-      const next = cam.zoom * (dy > 0 ? 0.9 : 1.1);
-      cam.setZoom(Phaser.Math.Clamp(next, 0.2, 2.2));
+      cam.setZoom(Phaser.Math.Clamp(cam.zoom * (dy > 0 ? 0.9 : 1.1), 0.3, 2.5));
     });
     let dragging = false, last = { x: 0, y: 0 };
     this.input.on('pointerdown', p => { if (p.rightButtonDown()) { dragging = true; last = { x: p.x, y: p.y }; } });
@@ -605,152 +553,291 @@ export default class GameScene extends Phaser.Scene {
   }
 
   // === Acciones aplicadas al BLOQUE seleccionado ===
-  plowSelected() {
-    if (!this.selectedParcelaId) return;
-    const p = repoGet('parcelas', this.selectedParcelaId);
-    if (!p) return;
+plowSelected() {
+  if (!this.selectedParcelaId) return;
+  const p = repoGet('parcelas', this.selectedParcelaId);
+  if (!p) return;
 
-    if (p.arada) { this.game.events.emit('toast',{type:'info', msg:`${p.id} ya está arada.`}); return; }
-    p.arada = true;
-    applyBlockVisual(this, p.id);
-    this.game.events.emit('toast', { type:'ok', msg:`Araste ${p.id}.` });
-    // redibuja selector
-    const blockId = this.blockIdByParcelaId.get(p.id);
-    if (blockId) this.drawBlockSelector(blockId);
+  if (p.arada) {
+    this.game.events.emit('toast', { type:'info', msg: t('game.toasts.parcelAlreadyPlowed', { parcel: p.id }) });
+    return;
   }
 
-  waterSelected() {
-    if ((this._cooldowns?.water || 0) > 0) return;
-    this._cooldowns.water = 400;
+  p.arada = true;
+  applyBlockVisual(this, p.id);
+  this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.plowSuccess', { parcel: p.id }) });
+  
+  const blockId = this.blockIdByParcelaId.get(p.id);
+  if (blockId) this.drawBlockSelector(blockId);
+}
 
-    const selId = this.selectedParcelaId;
-    if (!selId) return;
+waterSelected() {
+  if ((this._cooldowns?.water || 0) > 0) return;
+  this._cooldowns.water = 400;
 
-    const p = repoGet('parcelas', selId);
-    if (!p) return;
+  const selId = this.selectedParcelaId;
+  if (!selId) return;
 
-    const player = findFirstPlayer();
-    if (!spend(player, 10)) {
-      this.game.events.emit('toast', { type:'warn', msg:'Fondos insuficientes (10).' });
-      return;
-    }
+  const p = repoGet('parcelas', selId);
+  if (!p) return;
 
-    const agua = (p.recursos||[])
-      .map(rid => repoGet('recursos', rid))
-      .find(r => r && r.tipo === 'AGUA');
-
-    if (!agua) { this.game.events.emit('toast',{type:'warn',msg:`La parcela ${p.id} no tiene AGUA.`}); return; }
-
-    agua.nivel = Math.min(1, (agua.nivel ?? 0) + 0.25);
-
-    const WET_DURATION = 1200;
-    p.wetUntil = (p.wetUntil && State.clock < p.wetUntil)
-      ? p.wetUntil + Math.floor(WET_DURATION*0.5)
-      : State.clock + WET_DURATION;
-
-    applyBlockVisual(this, p.id);
-    this.game.events.emit('toast', { type:'ok', msg:`Riego aplicado a ${p.id}.` });
-
-    // limpia alertas y refresca panel
-    repoAll('alertas').forEach(a => { if (a.parcelaId === p.id) a.visible = false; });
-    const blockId = this.blockIdByParcelaId.get(p.id);
-    if (blockId) this.drawBlockSelector(blockId);
+  const player = findFirstPlayer();
+  if (!spend(player, 10)) {
+    this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.insufficientFunds', { amount: 10 }) });
+    return;
   }
 
-  harvestSelected(){
-    if (!this.selectedParcelaId) return;
-    const p = repoGet('parcelas', this.selectedParcelaId);
-    const c = p?.cultivoId ? repoGet('cultivos', p.cultivoId) : null;
-    const player = findFirstPlayer();
-    if(c?.etapa==='COSECHA' && c.progreso>=1){
-      player.cartera += 30;
-      c.etapa='SIEMBRA'; c.progreso=0;
-      this.game.events.emit('toast', { type:'ok', msg:`Cosechado ${c.tipo} en ${p.id}. +30` });
-      const blockId = this.blockIdByParcelaId.get(p.id);
-      if (blockId) this.drawBlockSelector(blockId);
-    } else {
-      this.game.events.emit('toast', { type:'warn', msg:'Aún no está listo.' });
-    }
+  const agua = (p.recursos||[])
+    .map(rid => repoGet('recursos', rid))
+    .find(r => r && r.tipo === 'AGUA');
+
+  if (!agua) {
+    this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.noWater', { parcel: p.id }) });
+    return;
   }
 
-  async plantSelected() {
-    if (!this.selectedParcelaId) {
-      this.game.events.emit('toast', { type:'warn', msg:'Selecciona una parcela primero.' });
-      return;
-    }
-    const p = repoGet('parcelas', this.selectedParcelaId);
-    if (!p) return;
+  agua.nivel = Math.min(1, (agua.nivel ?? 0) + 0.25);
 
-    if (p.cultivoId) {
-      const c = repoGet('cultivos', p.cultivoId);
-      this.game.events.emit('toast', { type:'info', msg:`${p.id} ya tiene ${c?.tipo || 'cultivo'}.` });
-      return;
-    }
+  const WET_DURATION = 1200;
+  p.wetUntil = (p.wetUntil && State.clock < p.wetUntil)
+    ? p.wetUntil + Math.floor(WET_DURATION*0.5)
+    : State.clock + WET_DURATION;
 
-    const player = findFirstPlayer();
-    if (!spend(player, 15)) {
-      this.game.events.emit('toast', { type:'warn', msg:'Fondos insuficientes (15).' });
-      return;
-    }
+  applyBlockVisual(this, p.id);
+  this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.waterSuccess', { parcel: p.id }) });
 
-    const cultivo = Factory.createCultivo({
-      tipo: 'MAIZ',
-      etapa: 'SIEMBRA',
-      progreso: 0,
-      consumoAgua: 1.0
+  repoAll('alertas').forEach(a => { if (a.parcelaId === p.id) a.visible = false; });
+  const blockId = this.blockIdByParcelaId.get(p.id);
+  if (blockId) this.drawBlockSelector(blockId);
+}
+
+harvestSelected() {
+  if (!this.selectedParcelaId) return;
+  const p = repoGet('parcelas', this.selectedParcelaId);
+  const c = p?.cultivoId ? repoGet('cultivos', p.cultivoId) : null;
+  const player = findFirstPlayer();
+  
+  if (!c) {
+    this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.noCrop') });
+    return;
+  }
+
+  // Verificar si está listo para cosechar
+  if (!isCultivoListo(c.id)) {
+    const progresoPct = (c.progreso * 100).toFixed(0);
+    this.game.events.emit('toast', {
+      type:'warn',
+      msg: t('game.toasts.cropNotReady', { crop: c.tipo, progress: progresoPct })
     });
-    p.cultivoId = cultivo.id;
-
-    this.game.events.emit('toast', { type:'ok', msg:`Sembraste ${cultivo.tipo} en ${p.id}.` });
-    const blockId = this.blockIdByParcelaId.get(p.id);
-    if (blockId) this.drawBlockSelector(blockId);
+    return;
   }
 
-  openTechTree() {
-    this.game.events.emit('toast', { type:'ok', msg:'Tech Tree (WIP): Riego por goteo, sensores, energía solar…' });
+  // Obtener configuración del cultivo
+  const config = CROP_CONFIG[c.tipo];
+  if (!config) {
+    this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.unknownCrop') });
+    return;
   }
 
-  scanRegion() {
-    if (!this.selectedParcelaId) {
-      this.game.events.emit('toast', { type:'warn', msg:'Selecciona una parcela para escanear.' });
-      return;
-    }
-    const p = repoGet('parcelas', this.selectedParcelaId);
-    if (!p) return;
-
-    const agua = (p.recursos||[]).map(rid => repoGet('recursos', rid)).find(r => r?.tipo==='AGUA');
-    const smapRZSM = Number(agua?.nivel ?? 0);
-    const ndvi     = Number(p.saludSuelo ?? 0.5);
-    const heat     = Phaser.Math.Clamp(Math.random()*0.6, 0, 1);
-
-    const msg =
-      `🛰️ Scan NASA\n` +
-      `• SMAP (RZSM): ${(smapRZSM*100).toFixed(0)}%\n` +
-      `• NDVI (salud): ${(ndvi*100).toFixed(0)}%\n` +
-      `• Heat stress: ${(heat*100).toFixed(0)}%`;
-    this.game.events.emit('toast', { type:'ok', msg });
+  // Calcular ganancia según salud del cultivo
+  let ganancia = config.precioVenta;
+  
+  // Bonus/penalización por salud (0-100%)
+  if (c.saludActual !== undefined) {
+    ganancia = Math.floor(ganancia * c.saludActual);
   }
 
-  sellHarvest() {
-    let total = 0;
-    for (const p of repoAll('parcelas')) {
-      if (!p.cultivoId) continue;
-      const c = repoGet('cultivos', p.cultivoId);
-      if (c?.etapa === 'COSECHA' && c.progreso >= 1) {
-        total += 30;
-        c.etapa = 'SIEMBRA';
-        c.progreso = 0;
-      }
-    }
-    const player = findFirstPlayer();
-    if (total > 0) {
-      player.cartera = (player.cartera || 0) + total;
-      this.game.events.emit('toast', { type:'ok', msg:`Venta realizada: +${total}` });
-    } else {
-      this.game.events.emit('toast', { type:'warn', msg:'No hay cosechas listas.' });
-    }
+  player.cartera += ganancia;
+
+  // Eliminar cultivo y liberar parcela
+  State.repos.cultivos.delete(c.id);
+  p.cultivoId = null;
+
+  this.game.events.emit('toast', {
+    type:'ok',
+    msg: t('game.toasts.harvestSuccess', { crop: config.nombre, amount: ganancia })
+  });
+
+  const blockId = this.blockIdByParcelaId.get(p.id);
+  if (blockId) this.drawBlockSelector(blockId);
+}
+
+async plantSelected() {
+  if (!this.selectedParcelaId) {
+    this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.selectParcelFirst') });
+    return;
+  }
+
+  const p = repoGet('parcelas', this.selectedParcelaId);
+  if (!p) return;
+
+  // Verificar que esté arada
+  if (!p.arada) {
+    this.game.events.emit('toast', {
+      type:'warn',
+      msg: t('game.toasts.plowFirst')
+    });
+    return;
+  }
+
+  // Verificar que no tenga cultivo
+  if (p.cultivoId) {
+    const c = repoGet('cultivos', p.cultivoId);
+    this.game.events.emit('toast', {
+      type:'info',
+      msg: t('game.toasts.parcelAlreadyPlanted', { parcel: p.id, crop: c?.tipo || t('game.toasts.genericCropName') })
+    });
+    return;
+  }
+
+  // Abrir menú de selección de semillas
+  this.openSeedMenu(p.id);
+}
+
+// Nueva función: Menú de selección de semillas
+openSeedMenu(parcelaId) {
+  // Por ahora, lista los cultivos disponibles en un toast
+  const opciones = Object.keys(CROP_CONFIG).map((key, index) => {
+    const cfg = CROP_CONFIG[key];
+    return `${index + 1}. ${cfg.nombre} ($${cfg.costoSemilla})`;
+  }).join('\n');
+
+  // TODO: Crear UI modal para seleccionar
+  // Por ahora, siembra MAIZ automáticamente
+  this.sembrarCultivo(parcelaId, 'MAIZ');
+  
+  // Mostrar opciones disponibles
+  this.game.events.emit('toast', {
+    type:'info',
+    msg: t('game.toasts.availableCrops', { list: opciones })
+  });
+}
+
+// Nueva función: Sembrar un cultivo específico
+sembrarCultivo(parcelaId, tipoCultivo) {
+  const p = repoGet('parcelas', parcelaId);
+  if (!p) return;
+
+  const config = CROP_CONFIG[tipoCultivo];
+  if (!config) {
+    this.game.events.emit('toast', {
+      type:'warn',
+      msg: t('game.toasts.cropMissing', { crop: tipoCultivo })
+    });
+    return;
+  }
+
+  const player = findFirstPlayer();
+  if (!spend(player, config.costoSemilla)) {
+    this.game.events.emit('toast', {
+      type:'warn',
+      msg: t('game.toasts.insufficientFunds', { amount: `$${config.costoSemilla}` })
+    });
+    return;
+  }
+
+  // Crear cultivo con configuración completa
+  const cultivo = Factory.createCultivo({
+    tipo: tipoCultivo,
+    etapa: 'SEMILLA',
+    progreso: 0,
+    consumoAgua: config.consumoAgua,
+    resistenciaPlagas: config.resistenciaPlagas,
+    saludActual: 1.0
+  });
+  
+  p.cultivoId = cultivo.id;
+
+  this.game.events.emit('toast', {
+    type:'ok',
+    msg: t('game.toasts.plantSuccess', { crop: config.nombre, parcel: p.id })
+  });
+
+  const blockId = this.blockIdByParcelaId.get(p.id);
+  if (blockId) this.drawBlockSelector(blockId);
+}
+
+openTechTree() {
+  // TODO: Abrir modal de mejoras
+  this.game.events.emit('toast', {
+    type:'ok',
+    msg: t('game.toasts.techTree')
+  });
+}
+
+scanRegion() {
+  if (!this.selectedParcelaId) {
+    this.game.events.emit('toast', {
+      type:'warn',
+      msg: t('game.toasts.selectParcelForScan')
+    });
+    return;
   }
   
+  const p = repoGet('parcelas', this.selectedParcelaId);
+  if (!p) return;
+
+  const agua = (p.recursos||[])
+    .map(rid => repoGet('recursos', rid))
+    .find(r => r?.tipo==='AGUA');
+  
+  const smapRZSM = Number(agua?.nivel ?? 0);
+  const ndvi     = Number(p.saludSuelo ?? 0.5);
+  const heat     = Phaser.Math.Clamp(Math.random()*0.6, 0, 1);
+
+  const msg = t('game.toasts.scanSummary', {
+    smap: (smapRZSM * 100).toFixed(0),
+    ndvi: (ndvi * 100).toFixed(0),
+    heat: (heat * 100).toFixed(0),
+  });
+
+  this.game.events.emit('toast', { type:'ok', msg });
+}
+
+sellHarvest() {
+  let total = 0;
+  let conteo = 0;
+  
+  for (const p of repoAll('parcelas')) {
+    if (!p.cultivoId) continue;
+    
+    const c = repoGet('cultivos', p.cultivoId);
+    if (!c) continue;
+
+    // Verificar si está listo
+    if (isCultivoListo(c.id)) {
+      const config = CROP_CONFIG[c.tipo];
+      if (!config) continue;
+
+      // Calcular ganancia con salud
+      let ganancia = config.precioVenta;
+      if (c.saludActual !== undefined) {
+        ganancia = Math.floor(ganancia * c.saludActual);
+      }
+
+      total += ganancia;
+      conteo++;
+
+      // Eliminar cultivo
+      State.repos.cultivos.delete(c.id);
+      p.cultivoId = null;
+    }
+  }
+
+  const player = findFirstPlayer();
+  if (total > 0) {
+    player.cartera = (player.cartera || 0) + total;
+    this.game.events.emit('toast', {
+      type:'ok',
+      msg: t('game.toasts.sellSuccess', { count: conteo, amount: total })
+    });
+  } else {
+    this.game.events.emit('toast', {
+      type:'warn',
+      msg: t('game.toasts.noHarvestReady')
+    });
+  }
+}
 
   update(_, delta) {
     // 1) Ajusta overlay al viewport de la cámara (independiente de zoom/scroll)
@@ -761,20 +848,16 @@ export default class GameScene extends Phaser.Scene {
       this.ambient.setSize(cam.worldView.width, cam.worldView.height);
     }
 
-    // 2) Avanza la simulación temporal antes de derivar efectos visuales
-    State.clock += 1;
-    tickSim(delta);
+    // 2) Día/tarde/noche + sombras
+    this.tickDayNight(delta);
 
-    // 3) Día/tarde/noche + sombras basados en TimeState
-    this.tickDayNight();
-
-    // 4) Cooldowns
+    // 3) Cooldowns
     const dec = delta;
     for (const k in this._cooldowns) {
       this._cooldowns[k] = Math.max(0, (this._cooldowns[k] || 0) - dec);
     }
 
-    // 5) Cámara (wasd/flechas)
+    // 4) Cámara (wasd/flechas)
     const cam = this.cameras.main;
     const dt = delta / 1000;
     const v = this.camSpeed / cam.zoom;
@@ -783,17 +866,17 @@ export default class GameScene extends Phaser.Scene {
     if (this.cursors?.up.isDown)    cam.scrollY -= v * dt;
     if (this.cursors?.down.isDown)  cam.scrollY += v * dt;
 
-    // 6) Atajos
+    // 5) Atajos
     if (Phaser.Input.Keyboard.JustDown(this.keyA)) this.plowSelected();
-    if (Phaser.Input.Keyboard.JustDown(this.keyW)) this.waterSelected();
-    if (Phaser.Input.Keyboard.JustDown(this.keyD)) this.harvestSelected();
-    if (Phaser.Input.Keyboard.JustDown(this.keyS)) this.sellHarvest();
-    if (Phaser.Input.Keyboard.JustDown(this.keyX)) this.openTechTree();
+    if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.waterSelected();
+    if (Phaser.Input.Keyboard.JustDown(this.keyC)) this.harvestSelected();
 
-    // 7) Simulación
+    // 6) Simulación
+    State.clock += 1;
+    tickSim(delta);
     tickClimate(); tickCrops(); tickPlagues(); tickAlerts();
 
-    // 8) Secado periódico
+    // 7) Secado periódico
     if ((State.clock % 15) === 0) {
       for (const p of repoAll('parcelas')) {
         if (p.wetUntil && State.clock >= p.wetUntil) {
@@ -804,12 +887,9 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
-  tickDayNight() {
-    // ===== Sincroniza con el reloj de la simulación (0..1)
-    const tSim = getSimDayProgress01();
-    if (!Number.isNaN(tSim)) {
-      this.timeOfDay = tSim;
-    }
+  tickDayNight(delta) {
+    // ===== Avanza el tiempo 0..1
+    this.timeOfDay = (this.timeOfDay + delta / this.dayLengthMs) % 1;
 
     // ===== Fases (tu lógica)
     const t = this.timeOfDay;

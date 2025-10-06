@@ -1,7 +1,6 @@
 // core/time.js
 export const REAL_LEVEL_MIN = 200;                 // 200 minutos por nivel
 export const REAL_LEVEL_SEC = REAL_LEVEL_MIN * 60; // 12000 s
-export const MINUTES_PER_SIM_DAY = 24 * 60;
 
 export const LEVELS = [
   { id: 1, name: 'Costa norte del Perú', start: '2023-01-01', days: 31+28+31+30 },       // 120
@@ -54,13 +53,7 @@ export function getSimDate(){ // Date “del calendario” actual
   return new Date(TimeState.simStartDate.getTime() + ms);
 }
 export function getSimDayNumber(){ // 1..levelDays
-  return Math.min(1 + Math.floor(TimeState.simMinutes / MINUTES_PER_SIM_DAY), TimeState.levelDays);
-}
-
-export function getSimDayProgress01(){
-  if (!TimeState.levelDays) return 0;
-  const minutesToday = ((TimeState.simMinutes % MINUTES_PER_SIM_DAY) + MINUTES_PER_SIM_DAY) % MINUTES_PER_SIM_DAY;
-  return minutesToday / MINUTES_PER_SIM_DAY;
+  return Math.min(1 + Math.floor(TimeState.simMinutes / (24*60)), TimeState.levelDays);
 }
 export function levelProgress01(){
   return Math.min(TimeState.elapsedRealSec / TimeState.levelRealBudgetSec, 1);
