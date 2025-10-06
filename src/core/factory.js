@@ -14,6 +14,8 @@ export const Factory = {
       name: overrides.name || 'Player 1',
       cartera: 1000,          // dinero disponible para la Tienda
       reputacion: 0,          // métrica social (misiones/eventos)
+      energiaMax: overrides.energiaMax ?? 100,
+      energiaActual: overrides.energiaActual ?? (overrides.energiaMax ?? 100),
       ...overrides
     };
     repoSet('jugadores', e);
