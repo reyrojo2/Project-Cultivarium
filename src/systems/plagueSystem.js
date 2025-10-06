@@ -7,6 +7,40 @@
 import { State, repoAll, repoGet } from '../core/state.js';
 import { Factory } from '../core/factory.js';
 import { ALERTAS_TIPO } from '../data/enums.js';
+import { translate as t } from '../utils/i18n.js';
+
+// Códigos de alerta reutilizados para evitar duplicados en el repo
+const ALERT_CODES = {
+  PEST_DETECTED: 'PEST_DETECTED',
+  PEST_CRITICAL: 'PEST_CRITICAL'
+};
+
+// Helper que crea/actualiza una alerta sin duplicarla en el repositorio global
+function ensureParcelAlert(parcelaId, code, type, message) {
+  if (!parcelaId || !code) return;
+  const alertsRepo = State?.repos?.alertas;
+  if (!alertsRepo) return;
+
+  const existing = Array.from(alertsRepo.values())
+    .find(a => a.parcelaId === parcelaId && a.codigo === code);
+
+  if (message) {
+    if (existing) {
+      existing.mensaje = message;
+      existing.visible = true;
+      if (type) existing.tipo = type;
+    } else {
+      Factory.createAlerta({
+        tipo: type || ALERTAS_TIPO.INFO,
+        mensaje: message,
+        parcelaId,
+        codigo: code
+      });
+    }
+  } else if (existing) {
+    existing.visible = false;
+  }
+}
 
 export function tickPlagues() {
   const clima = State.clima || { temperatura: 25, humedad: 50, evento: 'NINGUNO' };
@@ -55,13 +89,14 @@ export function tickPlagues() {
     if (!p.plagaActiva && p.riesgoPlaga > 0.6) {
       p.plagaActiva = true;
       p.intensidadPlaga = 1;
-      
-      // Crear alerta visual
-      Factory.createAlerta({
-        tipo: ALERTAS_TIPO.PLAGA || ALERTAS_TIPO.RIESGO,
-        mensaje: `¡Plaga detectada en ${p.id}!`,
-        parcelaId: p.id
-      });
+
+      // Tooltip persistente mientras la plaga esté activa
+      ensureParcelAlert(
+        p.id,
+        ALERT_CODES.PEST_DETECTED,
+        ALERTAS_TIPO.RIESGO,
+        t('ui.alerts.pestDetected', { parcel: p.id })
+      );
     }
 
     // --- EFECTO DE LA PLAGA ---
@@ -71,11 +106,12 @@ export function tickPlagues() {
         p.intensidadPlaga++;
         
         if (p.intensidadPlaga >= 3) {
-          Factory.createAlerta({
-            tipo: ALERTAS_TIPO.CRITICO,
-            mensaje: `¡Plaga crítica en ${p.id}!`,
-            parcelaId: p.id
-          });
+          ensureParcelAlert(
+            p.id,
+            ALERT_CODES.PEST_CRITICAL,
+            ALERTAS_TIPO.PELIGRO,
+            t('ui.alerts.pestCritical', { parcel: p.id })
+          );
         }
       }
 
@@ -100,12 +136,17 @@ export function tickPlagues() {
         p.intensidadPlaga = 0;
         p.riesgoPlaga = Math.max(0, p.riesgoPlaga - 0.3);
         
-        Factory.createAlerta({
-          tipo: ALERTAS_TIPO.INFO,
-          mensaje: `${p.id} se recuperó de la plaga`,
-          parcelaId: p.id
-        });
+        // Limpiamos los tooltips de plaga para esa parcela
+        ensureParcelAlert(p.id, ALERT_CODES.PEST_DETECTED, ALERTAS_TIPO.INFO, null);
+        ensureParcelAlert(p.id, ALERT_CODES.PEST_CRITICAL, ALERTAS_TIPO.INFO, null);
       }
+    }
+  }
+
+  // Ocultamos alertas antiguas si la plaga ya no está activa pero el riesgo sigue alto
+  for (const p of parcelas) {
+    if (!p.plagaActiva) {
+      ensureParcelAlert(p.id, ALERT_CODES.PEST_CRITICAL, ALERTAS_TIPO.INFO, null);
     }
   }
 }

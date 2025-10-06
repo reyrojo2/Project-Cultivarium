@@ -143,6 +143,7 @@ export const Factory = {
       mensaje: overrides.mensaje || 'Alerta creada',
       parcelaId: overrides.parcelaId || null,
       visible: true,
+      codigo: overrides.codigo || null,
       ...overrides
     };
     repoSet('alertas', e);
