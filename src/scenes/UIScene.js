@@ -18,7 +18,6 @@ export default class UIScene extends Phaser.Scene {
     this.dayText = null;
     this.playerNameText = null;
     this.levelText = null;
-    this.levelText = null;
     this.heatAlertTween = null; // Control del Tween
     this._dom = null;        // refs DOM cacheadas
     this._domLast = null;    // último snapshot para evitar trabajo repetido
@@ -160,20 +159,11 @@ export default class UIScene extends Phaser.Scene {
     });
 
     return {
-     
       container,
       content,
-     
-      content,
       width,
-     
       height,
-     
       side,
-      setMaxScroll: (value) => {
-        panelState.maxScroll = Math.max(0, value);
-      }
-   ,
       setMaxScroll: (value) => {
         panelState.maxScroll = Math.max(0, value);
       }
@@ -240,7 +230,6 @@ export default class UIScene extends Phaser.Scene {
     this.inspectText = this.add.text(24, y + 24, '', { fontSize: '12px', color: colors.textSecondary, wordWrap: { width: W - 48 } });
 
     container.add([this.playerNameText, this.levelText, this.dayText, this.inspectTitle, this.inspectText]);
-    container.add([this.playerNameText, this.levelText, this.dayText, this.inspectTitle, this.inspectText]);
     container.bringToTop(this.dayText);
 
     const sep2 = this.add.graphics().fillStyle(colors.panelBorder, 0.5).fillRect(16, y += 110, W - 32, 2);
@@ -252,13 +241,10 @@ export default class UIScene extends Phaser.Scene {
     container.add([this.alertsTitle, this.alertsText]);
 
     this.updatePanelScroll(panel);
-
-    this.updatePanelScroll(panel);
   }
 
 // ---------- Panel de Acciones ----------
 populateActionPanel(panel, colors) {
-  const container = panel.content;
   const container = panel.content;
   const W = panel.width;
   let y = 20;
@@ -348,28 +334,6 @@ populateActionPanel(panel, colors) {
     }
   });
   this.updatePanelScroll(panel);
-}
-
-  updatePanelScroll(panel) {
-    if (!panel?.content || typeof panel.setMaxScroll !== 'function') return;
-    const bounds = panel.content.getBounds();
-    if (!bounds) {
-      panel.setMaxScroll(0);
-      panel.content.y = 0;
-      return;
-    }
-
-    const containerWorldY = panel.container?.y ?? 0;
-    const top = bounds.y - containerWorldY;
-    const bottom = (bounds.bottom ?? (bounds.y + bounds.height)) - containerWorldY;
-    const contentHeight = Math.max(bottom - Math.min(0, top), 0);
-    const maxScroll = Math.max(0, contentHeight - panel.height);
-
-    panel.setMaxScroll(maxScroll);
-
-    if (panel.content.y < -maxScroll) panel.content.y = -maxScroll;
-    if (panel.content.y > 0) panel.content.y = 0;
-    this.updatePanelScroll(panel);
 }
 
   updatePanelScroll(panel) {
@@ -545,8 +509,6 @@ populateActionPanel(panel, colors) {
 
     if (this.levelText) {
       this.levelText.setText(t('ui.levelDisplay', { level: levelName }));
-    if (this.levelText) {
-      this.levelText.setText(t('ui.levelDisplay', { level: levelName }));
     }
 
     if (this.dayText) {
@@ -611,16 +573,12 @@ populateActionPanel(panel, colors) {
 
     this.updatePanelScroll(this.statusPanel);
     this.updatePanelScroll(this.actionPanel);
-
-    this.updatePanelScroll(this.statusPanel);
-    this.updatePanelScroll(this.actionPanel);
   }
 
   updateInspectPanel(data) {
     if (!this.inspectText) return;
     if (!data) {
       this.inspectText.setText(t('ui.inspectPlaceholder'));
-      this.updatePanelScroll(this.statusPanel);
       this.updatePanelScroll(this.statusPanel);
       return;
     }
@@ -659,7 +617,6 @@ populateActionPanel(panel, colors) {
     ];
 
     this.inspectText.setText(lines.join('\n'));
-    this.updatePanelScroll(this.statusPanel);
     this.updatePanelScroll(this.statusPanel);
   }
 
@@ -767,19 +724,6 @@ populateActionPanel(panel, colors) {
 
     if (this.playerNameText) {
       const profileName = window.__CV_START__?.profile?.name;
-      const nextName = profileName || t('ui.defaultPlayerName');
-      if (this.playerNameText.text !== nextName) {
-        this.playerNameText.setText(nextName);
-        this.updatePanelScroll(this.statusPanel);
-      }
-    }
-
-    if (this.levelText) {
-      const nextLevel = t('ui.levelDisplay', { level: levelName });
-      if (this.levelText.text !== nextLevel) {
-        this.levelText.setText(nextLevel);
-        this.updatePanelScroll(this.statusPanel);
-      }
       const nextName = profileName || t('ui.defaultPlayerName');
       if (this.playerNameText.text !== nextName) {
         this.playerNameText.setText(nextName);
