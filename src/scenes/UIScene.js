@@ -80,11 +80,18 @@ export default class UIScene extends Phaser.Scene {
 
     // ===== Listeners de juego (Toasts y Inspección) =====
     this.game.events.on('inspect:parcela', (data) => {
+      const riesgoPlaga = data.riesgoPlaga || 0;
+      const intensidadPlaga = data.intensidadPlaga || 0;
+      const plagaActiva = data.plagaActiva || false;
       const lines = [
         `Parcela: #${data.id}`,
         `Suelo: ${data.saludSuelo ? (data.saludSuelo * 100).toFixed(0) + '%' : '??'}`,
         data.cultivo ? `Cultivo: ${data.cultivo.tipo} (${data.cultivo.etapa} ${(data.cultivo.progreso * 100).toFixed(0)}%)` : 'Cultivo: -',
-        data.agua ? `Agua: ${(data.agua.nivel * 100).toFixed(0)}%` : 'Agua: -'
+        data.agua ? `Agua: ${(data.agua.nivel * 100).toFixed(0)}%` : 'Agua: -',
+        '', // línea en blanco
+        `Plaga: ${plagaActiva ? 'ACTIVA' : 'No'}`,
+        `Riesgo: ${(riesgoPlaga * 100).toFixed(1)}%`,
+        `Intensidad: ${intensidadPlaga > 0 ? intensidadPlaga + '/3' : '-'}`
       ];
       this.inspectText.setText(lines.join('\n'));
     });
@@ -202,36 +209,36 @@ populateActionPanel(panel, colors) {
   // Helper: ejecuta acción con feedback + cooldown visual/táctil
   const runAction = (label, eventType, feedbackText, feedbackColor, directFnName = null, cooldownMs = 500) => {
     const btn = this.createActionButton(label, y, async () => {
-      // evita doble click mientras está en cooldown
       if (btn.coolingDown) return;
       btn.coolingDown = true;
 
-      // 1) dispara acción real (directa a GameScene si existe método, si no, por evento)
       const gameScene =
-        (this.scene?.get && this.scene.get('Game')) || 
-        (this.game?.scene?.getScene && this.game.scene.getScene('Game')) || 
-        null; 
-      
-      if (directFnName && gameScene && typeof gameScene[directFnName] === 'function') { 
-          try { await gameScene[directFnName](); } catch(e) { /* opcional: log */ }
-        } else {
-          this.game.events.emit('action:perform', { actionType: eventType });
-        }
+        (this.scene?.get && this.scene.get('Game')) ||
+        (this.game?.scene?.getScene && this.game.scene.getScene('Game')) ||
+        null;
 
-      // 3) micro-animación “pressed”
+      if (directFnName && gameScene && typeof gameScene[directFnName] === 'function') {
+        try { await gameScene[directFnName](); } catch(e) {}
+      } else {
+        this.game.events.emit('action:perform', { actionType: eventType });
+      }
+
+      if (feedbackText) this.showActionFeedback(feedbackText, feedbackColor);
+
       this.tweens.add({ targets: [btn.bg, btn.text], scale: 0.96, duration: 80, yoyo: true, ease: 'Quad.easeInOut' });
 
-      // 4) enfriamiento (cambia color y desactiva momentáneamente)
+      // ⬇️ Cooldown sin perder hitArea
       const prevColor = btn.bg.fillColor;
-      btn.bg.fillColor = 0x445c3a; // tono más oscuro temporal
-      btn.bg.disableInteractive();
+      btn.bg.fillColor = 0x445c3a;
+      if (btn.bg.input) btn.bg.input.enabled = false;
 
       setTimeout(() => {
         btn.bg.fillColor = prevColor;
-        btn.bg.setInteractive({ useHandCursor: true });
+        if (btn.bg.input) btn.bg.input.enabled = true; else btn.enable();
         btn.coolingDown = false;
       }, cooldownMs);
     }, W, colors);
+
 
     container.add(btn.elements);
     this.actionButtons.push(btn);
@@ -322,31 +329,55 @@ populateActionPanel(panel, colors) {
     const height = 55;
 
     const bg = this.add.graphics();
-    bg.fillStyle(colors.actionButton).fillRoundedRect(pad, y, width, height, 14);
-    bg.lineStyle(2, colors.panelBorder).strokeRoundedRect(pad, y, width, height, 14);
+    // Dibuja en 0,0 y posiciona el gráfico
+    bg.fillStyle(colors.actionButton).fillRoundedRect(0, 0, width, height, 14);
+    bg.lineStyle(2, colors.panelBorder).strokeRoundedRect(0, 0, width, height, 14);
+    bg.setPosition(pad, y);
 
-    const t = this.add.text(panelWidth / 2, y + height / 2, text, { fontSize: '20px', color: colors.textPrimary, fontStyle: 'bold' }).setOrigin(0.5);
+    const t = this.add.text(panelWidth / 2, y + height / 2, text, {
+      fontSize: '20px', color: colors.textPrimary, fontStyle: 'bold'
+    }).setOrigin(0.5);
 
-    const hitArea = new Phaser.Geom.Rectangle(pad, y, width, height);
+    // ⬇️ HitArea fijo (siempre el mismo)
+    const hitArea = new Phaser.Geom.Rectangle(0, 0, width, height);
     bg.setInteractive(hitArea, Phaser.Geom.Rectangle.Contains);
+    bg.input.cursor = 'pointer';
 
-    // LÓGICA DE CINEMÁTICA Y RECHAZO
+    // Helpers para (des)activar SIN perder hitArea
+    const enable = () => {
+      if (!bg.input) bg.setInteractive(hitArea, Phaser.Geom.Rectangle.Contains);
+      else {
+        bg.input.hitArea = hitArea;
+        bg.input.hitAreaCallback = Phaser.Geom.Rectangle.Contains;
+        bg.input.enabled = true;
+      }
+      bg.fillColor = colors.actionButton;
+      bg.setAlpha(1);
+    };
+    const disable = () => {
+      if (bg.input) bg.input.enabled = false; // NO uses disableInteractive()
+      bg.fillColor = colors.actionButtonDisabled;
+      bg.setAlpha(0.55);
+    };
+
+    // Click
     bg.on('pointerdown', () => {
-      if (bg.input.enabled) {
-        // EFECTO DE PRESIÓN: Escala el botón (EL EFECTO CLAVE)
-        this.tweens.add({ targets: [bg, t], scale: 0.96, duration: 80, yoyo: true, ease: 'Quad.easeInOut' }); 
+      if (bg.input?.enabled) {
+        this.tweens.add({ targets: [bg, t], scale: 0.96, duration: 80, yoyo: true, ease: 'Quad.easeInOut' });
         onClick();
       } else {
-        // EFECTO DE RECHAZO: El botón se "sacude"
         this.tweens.add({ targets: bg, x: bg.x + 5, duration: 50, yoyo: true, repeat: 1, ease: 'Sine.easeInOut' });
+        this.showActionFeedback('🚫 ¡Acción Bloqueada! Falta energía o dinero.', this.colors.bar.heat);
       }
     });
-    
-    bg.on('pointerover', () => { if (bg.input.enabled) bg.fillColor = colors.actionButtonHover; });
-    bg.on('pointerout',  () => { if (bg.input.enabled) bg.fillColor = colors.actionButton; });
 
-    return { elements: [bg, t], bg, text: t };
+    bg.on('pointerover', () => { if (bg.input?.enabled) bg.fillColor = colors.actionButtonHover; });
+    bg.on('pointerout',  () => { if (bg.input?.enabled) bg.fillColor = colors.actionButton; });
+
+    // Devuelve helpers
+    return { elements: [bg, t], bg, text: t, enable, disable, hitArea };
   }
+
 
   // ---------- Update (Controla la lógica de estado y efectos) ----------
   update() {
