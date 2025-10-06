@@ -100,7 +100,7 @@
 /* ===== Mapa ===== */
 .world-map-container{
   position:relative;
-  background-image: url('assets/map.jpeg');
+  background-image: url('/assets/map.jpeg');
   background-size: cover;
   background-position: center;
 }
