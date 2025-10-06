@@ -112,6 +112,13 @@ export default class UIScene extends Phaser.Scene {
     panelBg.fillStyle(bgColor, 0.9).fillRoundedRect(0, 0, width, height, rads);
     panelBg.lineStyle(4, colors.panelBorder).strokeRoundedRect(0, 0, width, height, rads);
 
+    // Máscara dedicada (no visible) que replica la geometría del panel para evitar
+    // que un gráfico transparente tape los botones cuando el contenedor se mueve.
+    const maskShape = this.add.graphics();
+    maskShape.fillStyle(0xffffff, 1).fillRoundedRect(0, 0, width, height, rads);
+    maskShape.setVisible(false);
+    maskShape.setActive(false);
+
     const toggleButton = this.add.text(
       side === 'left' ? width - 25 : 25,
       height / 2,
@@ -123,19 +130,20 @@ export default class UIScene extends Phaser.Scene {
 
     const content = this.add.container(0, 0);
 
-    container.add([panelBg, content, toggleButton]);
+    container.add([panelBg, maskShape, content, toggleButton]);
 
     container.setSize(width, height);
     container.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
 
-    // Usamos la misma geometría del panel como máscara para asegurarnos
-    // de que el recorte siga cualquier animación o desplazamiento.
-    const geometryMask = panelBg.createGeometryMask();
+    // Usamos la geometría dedicada para recortar el contenido y que la máscara siga
+    // cualquier animación (colapsar/expandir) sin afectar la visibilidad del fondo.
+    const geometryMask = maskShape.createGeometryMask();
     geometryMask.setInvertAlpha(false);
     content.setMask(geometryMask);
 
     // Liberamos recursos de la máscara si el contenedor se destruye.
     container.once(Phaser.GameObjects.Events.DESTROY, () => {
+      maskShape.destroy();
       geometryMask.destroy();
     });
 
@@ -448,6 +456,8 @@ populateActionPanel(panel, colors) {
     const labelText = this.add.text(panelWidth / 2, y + height / 2, text, {
       fontSize: '20px', color: colors.textPrimary, fontStyle: 'bold'
     }).setOrigin(0.5);
+    labelText.setStroke('#0f172a', 6);
+    labelText.setShadow(0, 4, 'rgba(15,23,42,0.6)', 6, true, true);
 
     // ⬇️ HitArea fijo (siempre el mismo)
     const hitArea = new Phaser.Geom.Rectangle(0, 0, width, height);

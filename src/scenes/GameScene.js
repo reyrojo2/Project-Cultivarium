@@ -662,17 +662,17 @@ export default class GameScene extends Phaser.Scene {
     // correctamente en desktop, tablet o móvil.
     const computeResponsiveMetrics = () => {
       const viewportWidth = this.scale.width;
-      const scaleFactor = Phaser.Math.Clamp(viewportWidth / 1280, 0.85, 1.65);
+      const scaleFactor = Phaser.Math.Clamp(viewportWidth / 1024, 0.95, 2.25);
 
       return {
-        bubbleOffset: Math.round(120 * scaleFactor),
-        fontSize: Math.round(36 * scaleFactor),
-        padX: Math.round(32 * scaleFactor),
-        padY: Math.round(26 * scaleFactor),
-        pointerHeight: Math.round(34 * scaleFactor),
-        maxWidth: Phaser.Math.Clamp(Math.round(viewportWidth * 0.55), 360, 700),
-        pointerMaxHalf: Math.round(52 * scaleFactor),
-        floatAmplitude: Math.round(20 * scaleFactor)
+        bubbleOffset: Math.round(190 * scaleFactor),
+        fontSize: Math.round(56 * scaleFactor),
+        padX: Math.round(54 * scaleFactor),
+        padY: Math.round(44 * scaleFactor),
+        pointerHeight: Math.round(58 * scaleFactor),
+        maxWidth: Phaser.Math.Clamp(Math.round(viewportWidth * 0.62), 440, 900),
+        pointerMaxHalf: Math.round(78 * scaleFactor),
+        floatAmplitude: Math.round(28 * scaleFactor)
       };
     };
 
@@ -700,7 +700,10 @@ export default class GameScene extends Phaser.Scene {
       }
 
       text.setFontSize(nextMetrics.fontSize);
+      text.setLineSpacing(Math.round(nextMetrics.fontSize * 0.25));
       text.setText(message || '');
+      const shadowOffset = Math.max(4, Math.round(nextMetrics.fontSize * 0.18));
+      text.setShadow(0, shadowOffset, 'rgba(15,23,42,0.65)', shadowOffset * 2, true, true);
 
       const wrapWidth = nextMetrics.maxWidth - nextMetrics.padX * 2;
       text.setWordWrapWidth(wrapWidth, true);
@@ -713,12 +716,12 @@ export default class GameScene extends Phaser.Scene {
 
       bubble.clear();
       bubble.fillStyle(0x0f172a, 0.96);
-      bubble.fillRoundedRect(-width / 2, bubbleTop, width, height, 22);
+      bubble.fillRoundedRect(-width / 2, bubbleTop, width, height, 28);
       bubble.fillTriangle(-pointerHalf, pointerTop, pointerHalf, pointerTop, 0, 0);
-      bubble.lineStyle(4, 0xfacc15, 0.98);
-      bubble.strokeRoundedRect(-width / 2, bubbleTop, width, height, 22);
+      bubble.lineStyle(6, 0xfacc15, 0.98);
+      bubble.strokeRoundedRect(-width / 2, bubbleTop, width, height, 28);
       bubble.strokeTriangle(-pointerHalf, pointerTop, pointerHalf, pointerTop, 0, 0);
-      text.y = pointerTop - nextMetrics.padY + 8;
+      text.y = pointerTop - nextMetrics.padY + Math.round(nextMetrics.fontSize * 0.24);
     };
 
     container.add([bubble, text]);
