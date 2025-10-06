@@ -40,7 +40,8 @@
                 "crop": "Cultivo: {{type}} ({{stage}} {{progress}}%)",
                 "cropNone": "Cultivo: -",
                 "water": "Agua: {{value}}",
-                "waterNone": "Agua: -"
+                "waterNone": "Agua: -",
+                "pest": "Plaga: "
             },
             "alertsTitle": "\u26a0\ufe0f Alertas del Sistema",
             "alertsEmpty": "No hay alertas activas.",
@@ -49,9 +50,10 @@
                 "health": "SALUD (NDVI)",
                 "heat": "CALOR (Estr\u00e9s)",
                 "water": "HUMEDAD (SMAP RZSM)",
-                "humidity": "LLUVIA (GPM)",
+                "humidity": "HUMEDAD (GPM)",
                 "money": "DINERO ($)",
-                "energy": "ENERG\u00cdA (\u26a1)"
+                "energy": "ENERG\u00cdA (\u26a1)",
+                "rain": "LLUVIA"
             },
             "actions": {
                 "plow": {
@@ -152,7 +154,8 @@
                 "crop": "Crop: {{type}} ({{stage}} {{progress}}%)",
                 "cropNone": "Crop: -",
                 "water": "Water: {{value}}",
-                "waterNone": "Water: -"
+                "waterNone": "Water: -",
+                "pest":"Pest: "
             },
             "alertsTitle": "\u26a0\ufe0f System Alerts",
             "alertsEmpty": "No active alerts.",
@@ -163,7 +166,8 @@
                 "water": "SOIL MOISTURE (SMAP RZSM)",
                 "humidity": "RAINFALL (GPM)",
                 "money": "MONEY ($)",
-                "energy": "ENERGY (\u26a1)"
+                "energy": "ENERGY (\u26a1)",
+                "rain": "RAIN"
             },
             "actions": {
                 "plow": {
