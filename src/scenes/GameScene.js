@@ -11,6 +11,7 @@ import { findFirstPlayer, spend } from '../core/state.js';
 import { startLevel, tickSim, TimeState } from '../core/time.js';
 import { T, MAP_PRESETS, makePlayableMatrix, makeWorldMatrix, buildBlockIndex, buildFromPreset } from '../map/mapBuilder.js';
 import { DECOR, addDecor } from '../map/decor.js';
+import { CROP_CONFIG, isCultivoListo } from '../systems/cropSystem.js';
 
 // === Proyección ISO 2:1 ===
 const PROJ_W = 256;
@@ -549,152 +550,291 @@ export default class GameScene extends Phaser.Scene {
   }
 
   // === Acciones aplicadas al BLOQUE seleccionado ===
-  plowSelected() {
-    if (!this.selectedParcelaId) return;
-    const p = repoGet('parcelas', this.selectedParcelaId);
-    if (!p) return;
+plowSelected() {
+  if (!this.selectedParcelaId) return;
+  const p = repoGet('parcelas', this.selectedParcelaId);
+  if (!p) return;
 
-    if (p.arada) { this.game.events.emit('toast',{type:'info', msg:`${p.id} ya está arada.`}); return; }
-    p.arada = true;
-    applyBlockVisual(this, p.id);
-    this.game.events.emit('toast', { type:'ok', msg:`Araste ${p.id}.` });
-    // redibuja selector
-    const blockId = this.blockIdByParcelaId.get(p.id);
-    if (blockId) this.drawBlockSelector(blockId);
-  }
-
-  waterSelected() {
-    if ((this._cooldowns?.water || 0) > 0) return;
-    this._cooldowns.water = 400;
-
-    const selId = this.selectedParcelaId;
-    if (!selId) return;
-
-    const p = repoGet('parcelas', selId);
-    if (!p) return;
-
-    const player = findFirstPlayer();
-    if (!spend(player, 10)) {
-      this.game.events.emit('toast', { type:'warn', msg:'Fondos insuficientes (10).' });
-      return;
-    }
-
-    const agua = (p.recursos||[])
-      .map(rid => repoGet('recursos', rid))
-      .find(r => r && r.tipo === 'AGUA');
-
-    if (!agua) { this.game.events.emit('toast',{type:'warn',msg:`La parcela ${p.id} no tiene AGUA.`}); return; }
-
-    agua.nivel = Math.min(1, (agua.nivel ?? 0) + 0.25);
-
-    const WET_DURATION = 1200;
-    p.wetUntil = (p.wetUntil && State.clock < p.wetUntil)
-      ? p.wetUntil + Math.floor(WET_DURATION*0.5)
-      : State.clock + WET_DURATION;
-
-    applyBlockVisual(this, p.id);
-    this.game.events.emit('toast', { type:'ok', msg:`Riego aplicado a ${p.id}.` });
-
-    // limpia alertas y refresca panel
-    repoAll('alertas').forEach(a => { if (a.parcelaId === p.id) a.visible = false; });
-    const blockId = this.blockIdByParcelaId.get(p.id);
-    if (blockId) this.drawBlockSelector(blockId);
-  }
-
-  harvestSelected(){
-    if (!this.selectedParcelaId) return;
-    const p = repoGet('parcelas', this.selectedParcelaId);
-    const c = p?.cultivoId ? repoGet('cultivos', p.cultivoId) : null;
-    const player = findFirstPlayer();
-    if(c?.etapa==='COSECHA' && c.progreso>=1){
-      player.cartera += 30;
-      c.etapa='SIEMBRA'; c.progreso=0;
-      this.game.events.emit('toast', { type:'ok', msg:`Cosechado ${c.tipo} en ${p.id}. +30` });
-      const blockId = this.blockIdByParcelaId.get(p.id);
-      if (blockId) this.drawBlockSelector(blockId);
-    } else {
-      this.game.events.emit('toast', { type:'warn', msg:'Aún no está listo.' });
-    }
-  }
-
-  async plantSelected() {
-    if (!this.selectedParcelaId) {
-      this.game.events.emit('toast', { type:'warn', msg:'Selecciona una parcela primero.' });
-      return;
-    }
-    const p = repoGet('parcelas', this.selectedParcelaId);
-    if (!p) return;
-
-    if (p.cultivoId) {
-      const c = repoGet('cultivos', p.cultivoId);
-      this.game.events.emit('toast', { type:'info', msg:`${p.id} ya tiene ${c?.tipo || 'cultivo'}.` });
-      return;
-    }
-
-    const player = findFirstPlayer();
-    if (!spend(player, 15)) {
-      this.game.events.emit('toast', { type:'warn', msg:'Fondos insuficientes (15).' });
-      return;
-    }
-
-    const cultivo = Factory.createCultivo({
-      tipo: 'MAIZ',
-      etapa: 'SIEMBRA',
-      progreso: 0,
-      consumoAgua: 1.0
-    });
-    p.cultivoId = cultivo.id;
-
-    this.game.events.emit('toast', { type:'ok', msg:`Sembraste ${cultivo.tipo} en ${p.id}.` });
-    const blockId = this.blockIdByParcelaId.get(p.id);
-    if (blockId) this.drawBlockSelector(blockId);
-  }
-
-  openTechTree() {
-    this.game.events.emit('toast', { type:'ok', msg:'Tech Tree (WIP): Riego por goteo, sensores, energía solar…' });
-  }
-
-  scanRegion() {
-    if (!this.selectedParcelaId) {
-      this.game.events.emit('toast', { type:'warn', msg:'Selecciona una parcela para escanear.' });
-      return;
-    }
-    const p = repoGet('parcelas', this.selectedParcelaId);
-    if (!p) return;
-
-    const agua = (p.recursos||[]).map(rid => repoGet('recursos', rid)).find(r => r?.tipo==='AGUA');
-    const smapRZSM = Number(agua?.nivel ?? 0);
-    const ndvi     = Number(p.saludSuelo ?? 0.5);
-    const heat     = Phaser.Math.Clamp(Math.random()*0.6, 0, 1);
-
-    const msg =
-      `🛰️ Scan NASA\n` +
-      `• SMAP (RZSM): ${(smapRZSM*100).toFixed(0)}%\n` +
-      `• NDVI (salud): ${(ndvi*100).toFixed(0)}%\n` +
-      `• Heat stress: ${(heat*100).toFixed(0)}%`;
-    this.game.events.emit('toast', { type:'ok', msg });
-  }
-
-  sellHarvest() {
-    let total = 0;
-    for (const p of repoAll('parcelas')) {
-      if (!p.cultivoId) continue;
-      const c = repoGet('cultivos', p.cultivoId);
-      if (c?.etapa === 'COSECHA' && c.progreso >= 1) {
-        total += 30;
-        c.etapa = 'SIEMBRA';
-        c.progreso = 0;
-      }
-    }
-    const player = findFirstPlayer();
-    if (total > 0) {
-      player.cartera = (player.cartera || 0) + total;
-      this.game.events.emit('toast', { type:'ok', msg:`Venta realizada: +${total}` });
-    } else {
-      this.game.events.emit('toast', { type:'warn', msg:'No hay cosechas listas.' });
-    }
+  if (p.arada) { 
+    this.game.events.emit('toast', {type:'info', msg:`${p.id} ya está arada.`}); 
+    return; 
   }
   
+  p.arada = true;
+  applyBlockVisual(this, p.id);
+  this.game.events.emit('toast', { type:'ok', msg:`Araste ${p.id}.` });
+  
+  const blockId = this.blockIdByParcelaId.get(p.id);
+  if (blockId) this.drawBlockSelector(blockId);
+}
+
+waterSelected() {
+  if ((this._cooldowns?.water || 0) > 0) return;
+  this._cooldowns.water = 400;
+
+  const selId = this.selectedParcelaId;
+  if (!selId) return;
+
+  const p = repoGet('parcelas', selId);
+  if (!p) return;
+
+  const player = findFirstPlayer();
+  if (!spend(player, 10)) {
+    this.game.events.emit('toast', { type:'warn', msg:'Fondos insuficientes (10).' });
+    return;
+  }
+
+  const agua = (p.recursos||[])
+    .map(rid => repoGet('recursos', rid))
+    .find(r => r && r.tipo === 'AGUA');
+
+  if (!agua) { 
+    this.game.events.emit('toast', {type:'warn', msg:`La parcela ${p.id} no tiene AGUA.`}); 
+    return; 
+  }
+
+  agua.nivel = Math.min(1, (agua.nivel ?? 0) + 0.25);
+
+  const WET_DURATION = 1200;
+  p.wetUntil = (p.wetUntil && State.clock < p.wetUntil)
+    ? p.wetUntil + Math.floor(WET_DURATION*0.5)
+    : State.clock + WET_DURATION;
+
+  applyBlockVisual(this, p.id);
+  this.game.events.emit('toast', { type:'ok', msg:`Riego aplicado a ${p.id}.` });
+
+  repoAll('alertas').forEach(a => { if (a.parcelaId === p.id) a.visible = false; });
+  const blockId = this.blockIdByParcelaId.get(p.id);
+  if (blockId) this.drawBlockSelector(blockId);
+}
+
+harvestSelected() {
+  if (!this.selectedParcelaId) return;
+  const p = repoGet('parcelas', this.selectedParcelaId);
+  const c = p?.cultivoId ? repoGet('cultivos', p.cultivoId) : null;
+  const player = findFirstPlayer();
+  
+  if (!c) {
+    this.game.events.emit('toast', { type:'warn', msg:'No hay cultivo en esta parcela.' });
+    return;
+  }
+
+  // Verificar si está listo para cosechar
+  if (!isCultivoListo(c.id)) {
+    const progresoPct = (c.progreso * 100).toFixed(0);
+    this.game.events.emit('toast', { 
+      type:'warn', 
+      msg:`${c.tipo} no está listo. Progreso: ${progresoPct}%` 
+    });
+    return;
+  }
+
+  // Obtener configuración del cultivo
+  const config = CROP_CONFIG[c.tipo];
+  if (!config) {
+    this.game.events.emit('toast', { type:'warn', msg:'Cultivo desconocido.' });
+    return;
+  }
+
+  // Calcular ganancia según salud del cultivo
+  let ganancia = config.precioVenta;
+  
+  // Bonus/penalización por salud (0-100%)
+  if (c.saludActual !== undefined) {
+    ganancia = Math.floor(ganancia * c.saludActual);
+  }
+
+  player.cartera += ganancia;
+
+  // Eliminar cultivo y liberar parcela
+  State.repos.cultivos.delete(c.id);
+  p.cultivoId = null;
+
+  this.game.events.emit('toast', { 
+    type:'ok', 
+    msg:`Cosechado ${config.nombre}: +${ganancia}` 
+  });
+
+  const blockId = this.blockIdByParcelaId.get(p.id);
+  if (blockId) this.drawBlockSelector(blockId);
+}
+
+async plantSelected() {
+  if (!this.selectedParcelaId) {
+    this.game.events.emit('toast', { type:'warn', msg:'Selecciona una parcela primero.' });
+    return;
+  }
+
+  const p = repoGet('parcelas', this.selectedParcelaId);
+  if (!p) return;
+
+  // Verificar que esté arada
+  if (!p.arada) {
+    this.game.events.emit('toast', { 
+      type:'warn', 
+      msg:'Debes arar la tierra primero (A).' 
+    });
+    return;
+  }
+
+  // Verificar que no tenga cultivo
+  if (p.cultivoId) {
+    const c = repoGet('cultivos', p.cultivoId);
+    this.game.events.emit('toast', { 
+      type:'info', 
+      msg:`${p.id} ya tiene ${c?.tipo || 'cultivo'}.` 
+    });
+    return;
+  }
+
+  // Abrir menú de selección de semillas
+  this.openSeedMenu(p.id);
+}
+
+// Nueva función: Menú de selección de semillas
+openSeedMenu(parcelaId) {
+  // Por ahora, lista los cultivos disponibles en un toast
+  const opciones = Object.keys(CROP_CONFIG).map((key, index) => {
+    const cfg = CROP_CONFIG[key];
+    return `${index + 1}. ${cfg.nombre} ($${cfg.costoSemilla})`;
+  }).join('\n');
+
+  // TODO: Crear UI modal para seleccionar
+  // Por ahora, siembra MAIZ automáticamente
+  this.sembrarCultivo(parcelaId, 'MAIZ');
+  
+  // Mostrar opciones disponibles
+  this.game.events.emit('toast', { 
+    type:'info', 
+    msg:`Cultivos disponibles:\n${opciones}` 
+  });
+}
+
+// Nueva función: Sembrar un cultivo específico
+sembrarCultivo(parcelaId, tipoCultivo) {
+  const p = repoGet('parcelas', parcelaId);
+  if (!p) return;
+
+  const config = CROP_CONFIG[tipoCultivo];
+  if (!config) {
+    this.game.events.emit('toast', { 
+      type:'warn', 
+      msg:`Cultivo ${tipoCultivo} no existe.` 
+    });
+    return;
+  }
+
+  const player = findFirstPlayer();
+  if (!spend(player, config.costoSemilla)) {
+    this.game.events.emit('toast', { 
+      type:'warn', 
+      msg:`Fondos insuficientes ($${config.costoSemilla}).` 
+    });
+    return;
+  }
+
+  // Crear cultivo con configuración completa
+  const cultivo = Factory.createCultivo({
+    tipo: tipoCultivo,
+    etapa: 'SEMILLA',
+    progreso: 0,
+    consumoAgua: config.consumoAgua,
+    resistenciaPlagas: config.resistenciaPlagas,
+    saludActual: 1.0
+  });
+  
+  p.cultivoId = cultivo.id;
+
+  this.game.events.emit('toast', { 
+    type:'ok', 
+    msg:`Sembraste ${config.nombre} en ${p.id}.` 
+  });
+
+  const blockId = this.blockIdByParcelaId.get(p.id);
+  if (blockId) this.drawBlockSelector(blockId);
+}
+
+openTechTree() {
+  // TODO: Abrir modal de mejoras
+  this.game.events.emit('toast', { 
+    type:'ok', 
+    msg:'Tech Tree (WIP): Riego por goteo, sensores, energía solar…' 
+  });
+}
+
+scanRegion() {
+  if (!this.selectedParcelaId) {
+    this.game.events.emit('toast', { 
+      type:'warn', 
+      msg:'Selecciona una parcela para escanear.' 
+    });
+    return;
+  }
+  
+  const p = repoGet('parcelas', this.selectedParcelaId);
+  if (!p) return;
+
+  const agua = (p.recursos||[])
+    .map(rid => repoGet('recursos', rid))
+    .find(r => r?.tipo==='AGUA');
+  
+  const smapRZSM = Number(agua?.nivel ?? 0);
+  const ndvi     = Number(p.saludSuelo ?? 0.5);
+  const heat     = Phaser.Math.Clamp(Math.random()*0.6, 0, 1);
+
+  const msg =
+    `🛰️ Scan NASA\n` +
+    `• SMAP (RZSM): ${(smapRZSM*100).toFixed(0)}%\n` +
+    `• NDVI (salud): ${(ndvi*100).toFixed(0)}%\n` +
+    `• Heat stress: ${(heat*100).toFixed(0)}%`;
+  
+  this.game.events.emit('toast', { type:'ok', msg });
+}
+
+sellHarvest() {
+  let total = 0;
+  let conteo = 0;
+  
+  for (const p of repoAll('parcelas')) {
+    if (!p.cultivoId) continue;
+    
+    const c = repoGet('cultivos', p.cultivoId);
+    if (!c) continue;
+
+    // Verificar si está listo
+    if (isCultivoListo(c.id)) {
+      const config = CROP_CONFIG[c.tipo];
+      if (!config) continue;
+
+      // Calcular ganancia con salud
+      let ganancia = config.precioVenta;
+      if (c.saludActual !== undefined) {
+        ganancia = Math.floor(ganancia * c.saludActual);
+      }
+
+      total += ganancia;
+      conteo++;
+
+      // Eliminar cultivo
+      State.repos.cultivos.delete(c.id);
+      p.cultivoId = null;
+    }
+  }
+
+  const player = findFirstPlayer();
+  if (total > 0) {
+    player.cartera = (player.cartera || 0) + total;
+    this.game.events.emit('toast', { 
+      type:'ok', 
+      msg:`Venta realizada: ${conteo} cosechas = +${total}` 
+    });
+  } else {
+    this.game.events.emit('toast', { 
+      type:'warn', 
+      msg:'No hay cosechas listas.' 
+    });
+  }
+}
 
   update(_, delta) {
     // 1) Ajusta overlay al viewport de la cámara (independiente de zoom/scroll)

@@ -67,25 +67,27 @@ export const Factory = {
   },
 
   /**
-   * Cultivo (BANANO, MAIZ, etc.) con tiempos y producción esperada.
+   * Cultivo (MAIZ, etc.) con tiempos y producción esperada.
    * Se coloca en una Parcela. Interacciona con Recursos y EventosClima.
    */
   createCultivo(overrides={}) {
     const e = {
       id: newId('cultivo'),
       tipo: overrides.tipo || 'MAIZ',
-      etapa: 'SIEMBRA',        // SIEMBRA->CRECIMIENTO->COSECHA
-      progreso: 0,             // 0..1
-      consumoAgua: 0.5,        // por tick (escala relativa)
-      sensibilidadClima: {     // multiplicadores por tipo de clima
+      etapa: overrides.etapa || 'SIEMBRA',  // 
+      progreso: overrides.progreso ?? 0,
+      consumoAgua: overrides.consumoAgua ?? 1.0,  // ← Ahora respeta el override
+      resistenciaPlagas: overrides.resistenciaPlagas ?? 0,  // ← Nueva propiedad
+      saludActual: overrides.saludActual ?? 1.0,  // ← Nueva propiedad
+      sensibilidadClima: overrides.sensibilidadClima || {
         FRIO: 0.8, CALOR: 1.2, SEQUIA: 0.5, LLUVIA: 1.1
       },
-      plagas: [],              // ids de plagas presentes
+      plagas: overrides.plagas || [],
       ...overrides
-    };
+  };
     repoSet('cultivos', e);
     return e;
-  },
+},
 
   /** Máquina (riego, mantenimiento, cosecha), con costo por uso. */
   createMaquina(overrides={}) {

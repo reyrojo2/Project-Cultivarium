@@ -1,0 +1,117 @@
+/* ===== Base contenedor ===== */
+.cv-root {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+/* ===== Pantallas ===== */
+.screen{ display:none; width:100%; height:100%; position:absolute; inset:0; }
+.screen.active{ display:flex; }
+.center-col{ align-items:center; justify-content:center; flex-direction:column; }
+
+/* ===== Fondo principal ===== */
+.low-poly-bg{
+  background: url('/assets/fondo.png') no-repeat center center;
+  background-size: cover;
+  position: relative;
+}
+.low-poly-bg::before{
+  content:""; position:absolute; inset:0;
+  background: linear-gradient(to bottom, rgba(0,0,0,.25), rgba(0,0,0,.35));
+  pointer-events:none;
+}
+
+/* ===== Cards / Panels ===== */
+.glass-panel{
+  background: rgba(15,23,42,.6);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 1.5rem;
+  color:#F4F0E1;
+  padding: 3rem;
+  width: min(90vw, 560px);
+  text-align:center;
+}
+.glass-card{ /* portada con más contraste */
+  background: rgba(15,23,42,.55);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius:1.5rem;
+  color:#F4F0E1;
+  box-shadow: 0 12px 40px rgba(0,0,0,.45);
+  padding: 2.5rem clamp(1rem,3vw,3rem);
+  width: min(92vw, 820px);
+  display:flex; flex-direction:column; align-items:center; gap:1.25rem;
+}
+
+/* ===== Títulos ===== */
+.title-xl{
+  font-size: clamp(2.5rem, 6vw, 5rem);
+  font-weight: 800;
+  color: #fff;
+  margin: 0 0 1.5rem 0;
+  text-shadow: 0 6px 22px rgba(0,0,0,.55);
+}
+.subtitle{
+  font-size: 2rem;
+  font-weight: 800;
+  margin-bottom: 1rem;
+  color: #ffffff;
+}
+
+/* ===== Botonera ===== */
+.btn-stack{ display:flex; gap:1rem; flex-direction:column; align-items:center; }
+
+.btn-primary{
+  background:#E6D6A6; color:#5B3A29;
+  padding:.9rem 2.2rem; border-radius:9999px;
+  font-weight:800; cursor:pointer; border:none;
+  box-shadow:0 6px 18px rgba(0,0,0,.25);
+}
+.btn-primary:hover{ transform: translateY(-1px); }
+
+.btn-secondary{
+  background:transparent; border:2px solid #E6D6A6; color:#E6D6A6;
+  padding:.9rem 2.2rem; border-radius:9999px; font-weight:800;
+  box-shadow:0 4px 14px rgba(0,0,0,.2);
+}
+
+/* ===== Inputs ===== */
+.input-underline,
+.select-underline{
+  background:transparent;
+  border:none;
+  border-bottom:2px solid #ffffff88;
+  color:rgb(139, 137, 0); font-size:1.2rem; padding:.5rem; text-align:center;
+}
+.input-underline::placeholder{ color:#ffffffaa; }
+
+/* ===== Cards de modo ===== */
+.cards-row{ display:flex; gap:1rem; flex-wrap:wrap; justify-content:center; }
+.card-option{
+  flex:1 1 320px; border-radius:1rem; padding:1rem; cursor:pointer;
+  background: rgba(0,0,0,.15);
+}
+.card-option--adv { border:2px solid #22d3ee; }
+.card-option--leg { border:2px solid #facc15; }
+.card-option--adv h3{ color:#22d3ee; font-weight:800; }
+.card-option--leg h3{ color:#facc15; font-weight:800; }
+
+/* ===== Mapa ===== */
+.world-map-container{
+  position:relative;
+  background-image: url('/assets/map.jpeg');
+  background-size: cover;
+  background-position: center;
+}
+.level-node{
+  position:absolute; width:60px; height:60px;
+  background:#C85E4B; border:3px solid #F4F0E1; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  font-size:1.4rem; font-weight:700; cursor:pointer;
+  box-shadow:0 5px 15px rgba(0,0,0,.4);
+}
+.level-node.locked{ background:#5E7A47; cursor:not-allowed; opacity:.6; }
+
+/* ===== Utilidades ===== */
+.mt-12{ margin-top:1.2rem; }
