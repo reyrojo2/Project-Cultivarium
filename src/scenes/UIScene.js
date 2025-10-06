@@ -46,12 +46,13 @@ export default class UIScene extends Phaser.Scene {
       
       // Barras
       bar: {
-        hp: 0x00FFD1, // NDVI (Turquesa NASA)
-        heat: 0xf87171, // Rojo (Estrés por Calor)
+        hp: 0x00FFD1,    // NDVI (Turquesa NASA)
+        heat: 0xf87171,  // Rojo (Estrés por Calor)
         water: 0x60a5fa, // Azul (SMAP)
-        humidity: 0xfbbf24, // Amarillo (GPM/Lluvia)
-        money: 0xf59e0b, 
-        energy: 0xc084fc 
+        humidity: 0x2dd4bf, // Cian suave (Humedad relativa)
+        rain: 0xfbbf24,  // Amarillo (GPM/Lluvia)
+        money: 0xf59e0b,
+        energy: 0xc084fc
       },
     };
     this.colors = colors;
@@ -163,12 +164,13 @@ export default class UIScene extends Phaser.Scene {
 
     // Barras
     this.bars = {
-      hp:       this.createHudBar('SALUD (NDVI)', y, colors.bar.hp, W, colors),
-      heat:     this.createHudBar('CALOR (Estrés)', y += 66, colors.bar.heat, W, colors),
-      water:    this.createHudBar('HUMEDAD (SMAP RZSM)', y += 66, colors.bar.water, W, colors),
-      humidity: this.createHudBar('LLUVIA (GPM)', y += 66, colors.bar.humidity, W, colors),
-      money:    this.createHudBar('DINERO ($)', y += 66, colors.bar.money, W, colors),
-      energy:   this.createHudBar('ENERGÍA (⚡)', y += 66, colors.bar.energy, W, colors),
+      hp:        this.createHudBar('SALUD (NDVI)', y, colors.bar.hp, W, colors),
+      heat:      this.createHudBar('CALOR (Estrés)', y += 66, colors.bar.heat, W, colors),
+      water:     this.createHudBar('HUMEDAD (SMAP RZSM)', y += 66, colors.bar.water, W, colors),
+      humidity:  this.createHudBar('HUMEDAD (Relativa)', y += 66, colors.bar.humidity, W, colors),
+      rain:      this.createHudBar('LLUVIA (GPM)', y += 66, colors.bar.rain, W, colors),
+      money:     this.createHudBar('DINERO ($)', y += 66, colors.bar.money, W, colors),
+      energy:    this.createHudBar('ENERGÍA (⚡)', y += 66, colors.bar.energy, W, colors),
     };
     Object.values(this.bars).forEach(bar => container.add(bar.elements));
 
@@ -404,11 +406,12 @@ populateActionPanel(panel, colors) {
          const time = this.time.now;
          const mock = {
             hp: 0.75 + Math.sin(time / 1000) * 0.25,
-            heat: 0.40 + Math.cos(time / 800)  * 0.30,
+            heat: 0.40 + Math.cos(time / 800)  * 0.30,
             water: 0.50 + Math.sin(time / 1200) * 0.40,
             humidity: 0.60 + Math.cos(time / 1500) * 0.10,
+            rain: 0.50 + Math.sin(time / 900) * 0.25,
             money: 0.85 + Math.sin(time / 2000) * 0.05,
-            energy: 0.90 + Math.cos(time / 500)  * 0.10
+            energy: 0.90 + Math.cos(time / 500)  * 0.10
          };
          Object.keys(this.bars).forEach(k => this.bars[k].update(Phaser.Math.Clamp(mock[k], 0, 1)));
          hasEnergy = mock.energy > 0.1;
@@ -426,7 +429,10 @@ populateActionPanel(panel, colors) {
         heatValue = State.clima.estresTermico01;
         this.bars.heat.update(heatValue);
       }
-      this.bars.humidity.update(State?.clima?.lluviaGPM ?? 0); 
+
+      const clima = State?.clima || {};
+      if (this.bars.humidity) this.bars.humidity.update(clima.humedad01 ?? clima.humedadRelativa01 ?? 0);
+      if (this.bars.rain) this.bars.rain.update(clima.lluviaGPM ?? clima.precipitation01 ?? 0);
       
       if (p) {
         const eMax = p.energiaMax || 1;

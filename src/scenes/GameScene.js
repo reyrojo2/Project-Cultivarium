@@ -236,6 +236,12 @@ export default class GameScene extends Phaser.Scene {
 
     startLevel(0);
     this.timeOfDay = getSimDayProgress01();
+
+    const initialDay = getSimDayNumber();
+    _lastDay = initialDay - 1;
+    const initialIdx = Math.max(0, initialDay - 1);
+    tickClimate({ regionCode: State.region?.codigo, dayIndex: initialIdx })
+      .catch(err => console.error('climate:init', err));
     if (this.input?.setTopOnly) this.input.setTopOnly(true);
     Factory.createPlayer({ name: 'AgroPro', cartera: 200 });
     Factory.createTienda();
@@ -544,6 +550,8 @@ export default class GameScene extends Phaser.Scene {
     if (!parcela) return;
 
     this.selectedParcelaId = parcela.id;
+    const player = findFirstPlayer();
+    if (player) player.parcelaSeleccionadaId = parcela.id;
 
     const p = repoGet('parcelas', parcela.id);
     const c = p?.cultivoId ? repoGet('cultivos', p.cultivoId) : null;
@@ -776,8 +784,9 @@ export default class GameScene extends Phaser.Scene {
     const dayN = getSimDayNumber();
     if (dayN !== _lastDay) {
       _lastDay = dayN;
-      // Alinea el clima al día simulado
-      tickClimate({ regionCode: State.region?.codigo, dayIndex: dayN });
+      const dayIndex = Math.max(0, dayN - 1);
+      tickClimate({ regionCode: State.region?.codigo, dayIndex })
+        .catch(err => console.error('climate:tick', err));
     }
     tickCrops(); tickPlagues(); tickAlerts();
 
