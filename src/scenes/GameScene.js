@@ -6,7 +6,7 @@ import { Factory } from '../core/factory.js';
 import { EVENTOS_TIPO, NIVELES } from '../data/enums.js';
 import { tickClimate } from '../systems/climateSystem.js';
 import { getSimDayNumber } from '../core/time.js';
-import { tickCrops } from '../systems/cropSystem.js';
+import { tickCrops, CROP_CONFIG, isCultivoListo } from '../systems/cropSystem.js';
 import { tickPlagues } from '../systems/plagueSystem.js';
 import { tickAlerts } from '../systems/alertSystem.js';
 import { findFirstPlayer, spend } from '../core/state.js';
@@ -221,10 +221,13 @@ export default class GameScene extends Phaser.Scene {
     this.spritesByBlockId = new Map();
     this.parcelaByBlockId = new Map();
     this.blockIdByParcelaId = new Map();
+    this.blockPositions = new Map();
 
     this._cooldowns = { water: 0, plow: 0, harvest: 0, plant: 0 };
     this.decorEntries = []; // {sprite, shadow}
     this.timeOfDay = 0.5;   // 0..1 (se sincroniza con la simulación al iniciar)
+    this.parcelaIdByCultivoId = new Map();
+    this.cultivoSprites = new Map();
   }
 
   create() {
@@ -285,7 +288,10 @@ export default class GameScene extends Phaser.Scene {
     this.spritesByBlockId = new Map();
     this.parcelaByBlockId = new Map();
     this.blockIdByParcelaId = new Map();
+    this.blockPositions = new Map();
     this.spriteByParcela = new Map();
+    this.parcelaIdByCultivoId = new Map();
+    this.cultivoSprites = new Map();
     this.selectedParcelaId = null;
 
     // helper
@@ -342,6 +348,21 @@ export default class GameScene extends Phaser.Scene {
       const list = this.spritesByBlockId.get(b.id) || [];
       const rep  = list.length ? list[(list.length/2)|0] : null;
       if (rep) this.spriteByParcela.set(parcela.id, rep);
+
+      const center = isoProject(
+        worldX0 + b.w / 2,
+        worldY0 + b.h / 2,
+        this.offX,
+        this.offY
+      );
+      this.blockPositions.set(b.id, { x: center.sx, y: center.sy - 32 });
+    }
+
+    for (const parcela of repoAll('parcelas')) {
+      if (!parcela.cultivoId) continue;
+      this.parcelaIdByCultivoId.set(parcela.cultivoId, parcela.id);
+      const cultivo = repoGet('cultivos', parcela.cultivoId);
+      if (cultivo) this.showCultivoSprite(parcela.id, cultivo.tipo, cultivo.etapa);
     }
 
     this.decorEntries = [];
@@ -590,6 +611,60 @@ export default class GameScene extends Phaser.Scene {
     g.fillStyle(0x60a5fa, 0.06).fillPoints(pts, true);
   }
 
+  showCultivoSprite(parcelaId, tipoCultivo, etapa) {
+    const blockId = this.blockIdByParcelaId.get(parcelaId);
+    if (!blockId) return;
+
+    const existing = this.cultivoSprites.get(parcelaId);
+    if (existing) existing.destroy();
+
+    let emoji = '🌱';
+    switch (etapa) {
+      case 'BROTE': emoji = '🌿'; break;
+      case 'CRECIMIENTO': emoji = '🌾'; break;
+      case 'MADURO': emoji = '🌻'; break;
+      case 'COSECHA': emoji = '🧺'; break;
+      case 'MUERTO': emoji = '🥀'; break;
+      default: emoji = '🌱';
+    }
+
+    const pos = this.blockPositions.get(blockId);
+    if (!pos) return;
+
+    const emojiText = this.add.text(pos.x, pos.y, emoji, {
+      fontSize: '28px',
+      fontFamily: 'Arial',
+    }).setOrigin(0.5);
+
+    const rep = this.spriteByParcela.get(parcelaId);
+    const baseDepth = rep ? rep.depth + 5 : pos.y + 5;
+    emojiText.setDepth(baseDepth);
+
+    this.cultivoSprites.set(parcelaId, emojiText);
+  }
+
+  clearCultivoSprite(parcelaId) {
+    const existing = this.cultivoSprites.get(parcelaId);
+    if (existing) {
+      existing.destroy();
+      this.cultivoSprites.delete(parcelaId);
+    }
+  }
+
+  updateCultivoSprite(cultivo) {
+    if (!cultivo) return;
+    let parcelaId = this.parcelaIdByCultivoId.get(cultivo.id);
+
+    if (!parcelaId) {
+      const found = repoAll('parcelas').find(p => p.cultivoId === cultivo.id);
+      parcelaId = found?.id;
+      if (parcelaId) this.parcelaIdByCultivoId.set(cultivo.id, parcelaId);
+    }
+
+    if (!parcelaId) return;
+    this.showCultivoSprite(parcelaId, cultivo.tipo, cultivo.etapa);
+  }
+
   // === Acciones aplicadas al BLOQUE seleccionado ===
   plowSelected() {
     if (!this.selectedParcelaId) return;
@@ -651,18 +726,43 @@ export default class GameScene extends Phaser.Scene {
   harvestSelected(){
     if (!this.selectedParcelaId) return;
     const p = repoGet('parcelas', this.selectedParcelaId);
-    const c = p?.cultivoId ? repoGet('cultivos', p.cultivoId) : null;
-    const player = findFirstPlayer();
+    if (!p) return;
 
-    if(c?.etapa==='COSECHA' && c.progreso>=1){
-      player.cartera += 30;
-      c.etapa='SIEMBRA'; c.progreso=0;
-      this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.harvestSuccessSimple', { amount: 30, parcel: p.id }) });
-      const blockId = this.blockIdByParcelaId.get(p.id);
-      if (blockId) this.drawBlockSelector(blockId);
-    } else {
-      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.cropNotReady') });
+    const cultivo = p.cultivoId ? repoGet('cultivos', p.cultivoId) : null;
+    if (!cultivo) {
+      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.noCrop') });
+      return;
     }
+
+    if (!isCultivoListo(cultivo.id)) {
+      const config = CROP_CONFIG[cultivo.tipo];
+      const nombre = config?.nombre || cultivo.tipo;
+      const progresoPct = Math.round((cultivo.progreso || 0) * 100);
+      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.cropNotReady', { crop: nombre, progress: progresoPct }) });
+      return;
+    }
+
+    const config = CROP_CONFIG[cultivo.tipo];
+    if (!config) {
+      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.unknownCrop') });
+      return;
+    }
+
+    const player = findFirstPlayer();
+    const salud = typeof cultivo.saludActual === 'number' ? Math.min(Math.max(cultivo.saludActual, 0), 1) : 1;
+    const ganancia = Math.max(0, Math.floor(config.precioVenta * salud));
+
+    if (player) player.cartera = (player.cartera || 0) + ganancia;
+
+    State.repos.cultivos.delete(cultivo.id);
+    p.cultivoId = null;
+    this.parcelaIdByCultivoId.delete(cultivo.id);
+    this.clearCultivoSprite(p.id);
+
+    this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.harvestSuccess', { crop: config.nombre, amount: ganancia }) });
+
+    const blockId = this.blockIdByParcelaId.get(p.id);
+    if (blockId) this.drawBlockSelector(blockId);
   }
 
   async plantSelected() {
@@ -670,30 +770,72 @@ export default class GameScene extends Phaser.Scene {
       this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.selectParcelFirst') });
       return;
     }
+
     const p = repoGet('parcelas', this.selectedParcelaId);
     if (!p) return;
 
+    if (!p.arada) {
+      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.plowFirst') });
+      return;
+    }
+
     if (p.cultivoId) {
-      const c = repoGet('cultivos', p.cultivoId);
-      this.game.events.emit('toast', { type:'info', msg: t('game.toasts.parcelAlreadyPlanted', { parcel: p.id, crop: c?.tipo || t('game.toasts.genericCropName') }) });
+      const cultivo = repoGet('cultivos', p.cultivoId);
+      const config = cultivo ? CROP_CONFIG[cultivo.tipo] : null;
+      const cropName = config?.nombre || cultivo?.tipo || t('game.toasts.genericCropName');
+      this.game.events.emit('toast', { type:'info', msg: t('game.toasts.parcelAlreadyPlanted', { parcel: p.id, crop: cropName }) });
+      return;
+    }
+
+    this.openSeedMenu(p.id);
+  }
+
+  openSeedMenu(parcelaId) {
+    const opciones = Object.keys(CROP_CONFIG).map((key, index) => {
+      const cfg = CROP_CONFIG[key];
+      return `${index + 1}. ${cfg.nombre} ($${cfg.costoSemilla})`;
+    }).join('\n');
+
+    this.game.events.emit('toast', {
+      type:'info',
+      msg: t('game.toasts.availableCrops', { list: opciones })
+    });
+
+    this.sembrarCultivo(parcelaId, 'MAIZ');
+  }
+
+  sembrarCultivo(parcelaId, tipoCultivo) {
+    const p = repoGet('parcelas', parcelaId);
+    if (!p) return;
+
+    const config = CROP_CONFIG[tipoCultivo];
+    if (!config) {
+      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.cropMissing', { crop: tipoCultivo }) });
       return;
     }
 
     const player = findFirstPlayer();
-    if (!spend(player, 15)) {
-      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.insufficientFunds', { amount: 15 }) });
+    if (!spend(player, config.costoSemilla)) {
+      this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.insufficientFunds', { amount: config.costoSemilla }) });
       return;
     }
 
     const cultivo = Factory.createCultivo({
-      tipo: 'MAIZ',
-      etapa: 'SIEMBRA',
+      tipo: tipoCultivo,
+      etapa: 'SEMILLA',
       progreso: 0,
-      consumoAgua: 1.0
+      consumoAgua: config.consumoAgua,
+      resistenciaPlagas: config.resistenciaPlagas,
+      saludActual: 1.0
     });
-    p.cultivoId = cultivo.id;
 
-    this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.plantSuccess', { crop: 'MAIZ', parcel: p.id }) });
+    p.cultivoId = cultivo.id;
+    this.parcelaIdByCultivoId.set(cultivo.id, p.id);
+
+    this.showCultivoSprite(p.id, tipoCultivo, cultivo.etapa);
+
+    this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.plantSuccess', { crop: config.nombre, parcel: p.id }) });
+
     const blockId = this.blockIdByParcelaId.get(p.id);
     if (blockId) this.drawBlockSelector(blockId);
   }
@@ -725,19 +867,34 @@ export default class GameScene extends Phaser.Scene {
 
   sellHarvest() {
     let total = 0;
+    let conteo = 0;
+
     for (const p of repoAll('parcelas')) {
       if (!p.cultivoId) continue;
-      const c = repoGet('cultivos', p.cultivoId);
-      if (c?.etapa === 'COSECHA' && c.progreso >= 1) {
-        total += 30;
-        c.etapa = 'SIEMBRA';
-        c.progreso = 0;
-      }
+      const cultivo = repoGet('cultivos', p.cultivoId);
+      if (!cultivo) continue;
+
+      if (!isCultivoListo(cultivo.id)) continue;
+
+      const config = CROP_CONFIG[cultivo.tipo];
+      if (!config) continue;
+
+      const salud = typeof cultivo.saludActual === 'number' ? Math.min(Math.max(cultivo.saludActual, 0), 1) : 1;
+      const ganancia = Math.max(0, Math.floor(config.precioVenta * salud));
+
+      total += ganancia;
+      conteo++;
+
+      State.repos.cultivos.delete(cultivo.id);
+      this.parcelaIdByCultivoId.delete(cultivo.id);
+      this.clearCultivoSprite(p.id);
+      p.cultivoId = null;
     }
+
     const player = findFirstPlayer();
     if (total > 0) {
-      player.cartera = (player.cartera || 0) + total;
-      this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.sellSuccessSimple', { amount: total }) });
+      if (player) player.cartera = (player.cartera || 0) + total;
+      this.game.events.emit('toast', { type:'ok', msg: t('game.toasts.sellSuccess', { count: conteo, amount: total }) });
     } else {
       this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.noHarvestReady') });
     }
