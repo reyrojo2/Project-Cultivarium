@@ -230,6 +230,8 @@ export default class GameScene extends Phaser.Scene {
     this.parcelaIdByCultivoId = new Map();
     this.cultivoSprites = new Map();
     this.alertMarkers = new Map();
+    this.seedMenu = null; // Referencia al menú emergente de semillas activo.
+    this.seedMenuHandlers = {}; // Guarda listeners asociados al menú para poder limpiarlos.
   }
 
   create() {
@@ -297,6 +299,8 @@ export default class GameScene extends Phaser.Scene {
     this.parcelaIdByCultivoId = new Map();
     this.cultivoSprites = new Map();
     this.alertMarkers = new Map();
+    this.seedMenu = null;
+    this.seedMenuHandlers = {};
     this.selectedParcelaId = null;
 
     // helper
@@ -572,6 +576,7 @@ export default class GameScene extends Phaser.Scene {
       this.game.events.off('action:perform', this._onUIAction);
       this.alertMarkers.forEach(marker => marker.destroy());
       this.alertMarkers.clear();
+      this.closeSeedMenu(); // Garantiza que el overlay de semillas no quede colgado al cerrar la escena.
     });
 
     if (!this.scene.isActive('UI')) this.scene.launch('UI');
@@ -639,12 +644,38 @@ export default class GameScene extends Phaser.Scene {
     };
   }
 
+  // Destruye de manera segura cualquier estructura que se haya guardado como
+  // representación visual del cultivo (texto suelto, lista de textos, etc.).
+  destroyCultivoSpriteEntry(entry) {
+    if (!entry) return;
+
+    if (Array.isArray(entry)) {
+      entry.forEach(item => this.destroyCultivoSpriteEntry(item));
+      return;
+    }
+
+    if (entry.texts) {
+      entry.texts.forEach(item => this.destroyCultivoSpriteEntry(item));
+    }
+
+    if (entry.container && typeof entry.container.destroy === 'function') {
+      entry.container.destroy(true);
+    }
+
+    if (typeof entry.destroy === 'function') {
+      entry.destroy();
+    }
+  }
+
   showCultivoSprite(parcelaId, tipoCultivo, etapa, progreso = 0) {
     const blockId = this.blockIdByParcelaId.get(parcelaId);
     if (!blockId) return;
 
     const existing = this.cultivoSprites.get(parcelaId);
-    if (existing) existing.destroy();
+    if (existing) {
+      this.destroyCultivoSpriteEntry(existing);
+      this.cultivoSprites.delete(parcelaId);
+    }
 
     // Determina la fase visual tomando en cuenta progreso y etapa para desplegar
     // íconos especiales (ej: semilla de maíz recién sembrada vs. brote).
@@ -662,35 +693,54 @@ export default class GameScene extends Phaser.Scene {
       default: emoji = '🌱';
     }
 
-    const pos = this.blockPositions.get(blockId);
-    if (!pos) return;
-
-    // Escalamos el ícono en función del tamaño del viewport para que conserve
-    // presencia visual en cualquier resolución.
     const metrics = this.getCultivoSpriteMetrics();
-    const emojiText = this.add.text(pos.x, pos.y - metrics.yOffset, emoji, {
-      fontSize: `${metrics.fontSize}px`,
-      fontFamily: 'Noto Color Emoji, "Segoe UI Emoji", system-ui, sans-serif',
-      align: 'center'
-    }).setOrigin(0.5);
+    const tiles = this.spritesByBlockId.get(blockId) || [];
+    const overlays = [];
 
-    // Aplicamos trazo y sombra para que el ícono destaque sobre el suelo.
-    emojiText.setStroke('#0f172a', metrics.stroke);
-    emojiText.setShadow(0, metrics.shadow, 'rgba(15,23,42,0.65)', metrics.shadow * 1.5, true, true);
+    if (tiles.length) {
+      // Replica el emoji en cada sprite base que compone el bloque, de modo
+      // que las parcelas multi-tile mantengan consistencia visual.
+      tiles.forEach((tile) => {
+        if (!tile?.active) return;
+        const text = this.add.text(tile.x, tile.y - metrics.yOffset, emoji, {
+          fontSize: `${metrics.fontSize}px`,
+          fontFamily: 'Noto Color Emoji, "Segoe UI Emoji", system-ui, sans-serif',
+          align: 'center'
+        }).setOrigin(0.5);
 
-    const rep = this.spriteByParcela.get(parcelaId);
-    const baseDepth = rep ? rep.depth + 25 : pos.y + 50;
-    emojiText.setDepth(baseDepth);
+        text.setStroke('#0f172a', metrics.stroke);
+        text.setShadow(0, metrics.shadow, 'rgba(15,23,42,0.65)', metrics.shadow * 1.5, true, true);
+        text.setDepth((tile.depth ?? 0) + 25);
+        overlays.push(text);
+      });
+    } else {
+      // Fallback para casos extremos donde el bloque no tenga sprites
+      // registrados (p. ej. datos corruptos o escenas antiguas).
+      const pos = this.blockPositions.get(blockId);
+      if (!pos) return;
 
-    this.cultivoSprites.set(parcelaId, emojiText);
+      const text = this.add.text(pos.x, pos.y - metrics.yOffset, emoji, {
+        fontSize: `${metrics.fontSize}px`,
+        fontFamily: 'Noto Color Emoji, "Segoe UI Emoji", system-ui, sans-serif',
+        align: 'center'
+      }).setOrigin(0.5);
+
+      text.setStroke('#0f172a', metrics.stroke);
+      text.setShadow(0, metrics.shadow, 'rgba(15,23,42,0.65)', metrics.shadow * 1.5, true, true);
+      const rep = this.spriteByParcela.get(parcelaId);
+      const baseDepth = rep ? rep.depth + 25 : pos.y + 50;
+      text.setDepth(baseDepth);
+      overlays.push(text);
+    }
+
+    this.cultivoSprites.set(parcelaId, { texts: overlays });
   }
 
   clearCultivoSprite(parcelaId) {
     const existing = this.cultivoSprites.get(parcelaId);
-    if (existing) {
-      existing.destroy();
-      this.cultivoSprites.delete(parcelaId);
-    }
+    if (!existing) return;
+    this.destroyCultivoSpriteEntry(existing);
+    this.cultivoSprites.delete(parcelaId);
   }
 
   createAlertMarker(alert, pos) {
@@ -1003,34 +1053,156 @@ export default class GameScene extends Phaser.Scene {
     this.openSeedMenu(p.id);
   }
 
-  openSeedMenu(parcelaId) {
-    const opciones = Object.keys(CROP_CONFIG).map((key, index) => {
-      const cfg = CROP_CONFIG[key];
-      return `${index + 1}. ${cfg.nombre} ($${cfg.costoSemilla})`;
-    }).join('\n');
+  closeSeedMenu() {
+    // Removemos listeners dedicados (teclas, etc.) para evitar que disparen
+    // acciones cuando el menú ya no está visible.
+    if (this.seedMenuHandlers?.esc && this.input?.keyboard) {
+      this.input.keyboard.off('keydown-ESC', this.seedMenuHandlers.esc, this);
+    }
 
-    this.game.events.emit('toast', {
-      type:'info',
-      msg: t('game.toasts.availableCrops', { list: opciones })
+    if (this.seedMenu?.container && typeof this.seedMenu.container.destroy === 'function') {
+      this.seedMenu.container.destroy(true);
+    }
+
+    this.seedMenu = null;
+    this.seedMenuHandlers = {};
+  }
+
+  openSeedMenu(parcelaId) {
+    this.closeSeedMenu();
+
+    const cam = this.cameras.main;
+    const view = cam?.worldView;
+    const centerX = view ? view.centerX : cam.midPoint.x;
+    const centerY = view ? view.centerY : cam.midPoint.y;
+
+    const container = this.add.container(centerX, centerY).setDepth(1_000_000);
+    container.setScrollFactor(1);
+
+    // Crea un fondo semitransparente que bloquea clics en el mapa mientras el
+    // jugador elige el cultivo a sembrar.
+    const backdropWidth = view ? view.width * 1.4 : cam.width / cam.zoom;
+    const backdropHeight = view ? view.height * 1.4 : cam.height / cam.zoom;
+    const backdrop = this.add.rectangle(0, 0, backdropWidth, backdropHeight, 0x0f172a, 0.45)
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: false });
+    backdrop.on('pointerup', () => this.closeSeedMenu());
+    container.add(backdrop);
+
+    const cropKeys = Object.keys(CROP_CONFIG);
+    const buttonCount = cropKeys.length;
+    const panelWidth = Math.min(600, (view ? view.width : cam.width) * 0.75);
+    const buttonHeight = 86;
+    const buttonSpacing = 16;
+    const panelHeight = Math.max(280, buttonCount * (buttonHeight + buttonSpacing) + 180);
+
+    const panel = this.add.rectangle(0, 0, panelWidth, panelHeight, 0x1e293b, 0.94)
+      .setOrigin(0.5);
+    panel.setStrokeStyle(6, 0xfacc15, 0.9);
+    panel.setInteractive(new Phaser.Geom.Rectangle(-panelWidth / 2, -panelHeight / 2, panelWidth, panelHeight), Phaser.Geom.Rectangle.Contains);
+    container.add(panel);
+
+    const title = this.add.text(0, -panelHeight / 2 + 48, t('game.seedMenu.title'), {
+      fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+      fontSize: '32px',
+      fontStyle: '700',
+      color: '#f8fafc',
+      align: 'center'
+    }).setOrigin(0.5, 0);
+    container.add(title);
+
+    const subtitle = this.add.text(0, title.y + 42, t('game.seedMenu.subtitle'), {
+      fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+      fontSize: '18px',
+      color: '#cbd5f5',
+      align: 'center',
+      wordWrap: { width: panelWidth - 80 }
+    }).setOrigin(0.5, 0);
+    container.add(subtitle);
+
+    const metrics = { panelWidth, buttonHeight, buttonSpacing };
+    const listTop = subtitle.y + 88;
+
+    const localizeCropName = (key, fallback) => {
+      const translationKey = `game.crops.${key}`;
+      const localized = t(translationKey);
+      return localized === translationKey ? (fallback || key) : localized;
+    };
+
+    cropKeys.forEach((cropKey, idx) => {
+      const cfg = CROP_CONFIG[cropKey];
+      const y = listTop + idx * (metrics.buttonHeight + metrics.buttonSpacing);
+      const optionWidth = panelWidth - 96;
+
+      const optionBg = this.add.rectangle(0, y, optionWidth, metrics.buttonHeight, 0x334155, 0.92)
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true });
+
+      optionBg.on('pointerover', () => optionBg.setFillStyle(0x3b4760, 0.96));
+      optionBg.on('pointerout', () => optionBg.setFillStyle(0x334155, 0.92));
+      optionBg.on('pointerup', () => {
+        const planted = this.sembrarCultivo(parcelaId, cropKey);
+        if (planted) {
+          this.closeSeedMenu();
+        }
+      });
+
+      const optionText = this.add.text(0, y, t('game.seedMenu.optionLabel', {
+        crop: localizeCropName(cropKey, cfg?.nombre || cropKey),
+        cost: cfg?.costoSemilla ?? 0
+      }), {
+        fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+        fontSize: '24px',
+        color: '#f8fafc',
+        fontStyle: '600',
+        align: 'center'
+      }).setOrigin(0.5);
+
+      container.add(optionBg);
+      container.add(optionText);
     });
 
-    this.sembrarCultivo(parcelaId, 'MAIZ');
+    const cancelY = panelHeight / 2 - 70;
+    const cancelBg = this.add.rectangle(0, cancelY, panelWidth - 220, 68, 0x64748b, 0.88)
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    cancelBg.on('pointerover', () => cancelBg.setFillStyle(0x94a3b8, 0.92));
+    cancelBg.on('pointerout', () => cancelBg.setFillStyle(0x64748b, 0.88));
+    cancelBg.on('pointerup', () => this.closeSeedMenu());
+
+    const cancelText = this.add.text(0, cancelY, t('game.seedMenu.cancel'), {
+      fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+      fontSize: '22px',
+      fontStyle: '600',
+      color: '#0f172a'
+    }).setOrigin(0.5);
+
+    container.add(cancelBg);
+    container.add(cancelText);
+
+    const escHandler = () => this.closeSeedMenu();
+    if (this.input?.keyboard) {
+      this.input.keyboard.on('keydown-ESC', escHandler, this);
+      this.seedMenuHandlers.esc = escHandler;
+    }
+
+    this.seedMenu = { container, parcelaId };
   }
 
   sembrarCultivo(parcelaId, tipoCultivo) {
     const p = repoGet('parcelas', parcelaId);
-    if (!p) return;
+    if (!p) return false;
 
     const config = CROP_CONFIG[tipoCultivo];
     if (!config) {
       this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.cropMissing', { crop: tipoCultivo }) });
-      return;
+      return false;
     }
 
     const player = findFirstPlayer();
     if (!spend(player, config.costoSemilla)) {
       this.game.events.emit('toast', { type:'warn', msg: t('game.toasts.insufficientFunds', { amount: config.costoSemilla }) });
-      return;
+      return false;
     }
 
     const cultivo = Factory.createCultivo({
@@ -1055,6 +1227,8 @@ export default class GameScene extends Phaser.Scene {
 
     const blockId = this.blockIdByParcelaId.get(p.id);
     if (blockId) this.drawBlockSelector(blockId);
+
+    return true;
   }
 
   openTechTree() {

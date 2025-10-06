@@ -96,6 +96,18 @@
         },
         "game": {
             "hudShortcuts": "ISO 256\u00d7128 \u2014 Arar (A) / Riega (R) / Cosecha (C) \u2014 Click bloque para seleccionar",
+            "seedMenu": {
+                "title": "Elige el cultivo",
+                "subtitle": "Selecciona la semilla que quieres plantar en la parcela activa.",
+                "optionLabel": "{{crop}} \u2014 ${{cost}}",
+                "cancel": "Cancelar"
+            },
+            "crops": {
+                "MAIZ": "Ma\u00edz",
+                "TRIGO": "Trigo",
+                "PAPA": "Papa",
+                "TOMATE": "Tomate"
+            },
             "toasts": {
                 "parcelAlreadyPlowed": "{{parcel}} ya est\u00e1 arada.",
                 "plowSuccess": "Araste {{parcel}}.",
@@ -218,6 +230,18 @@
         },
         "game": {
             "hudShortcuts": "ISO 256\u00d7128 \u2014 Plow (A) / Water (R) / Harvest (C) \u2014 Click a block to select",
+            "seedMenu": {
+                "title": "Choose your crop",
+                "subtitle": "Pick the seed you want to plant in the selected plot.",
+                "optionLabel": "{{crop}} \u2014 ${{cost}}",
+                "cancel": "Cancel"
+            },
+            "crops": {
+                "MAIZ": "Maize",
+                "TRIGO": "Wheat",
+                "PAPA": "Potato",
+                "TOMATE": "Tomato"
+            },
             "toasts": {
                 "parcelAlreadyPlowed": "{{parcel}} is already plowed.",
                 "plowSuccess": "You plowed {{parcel}}.",
