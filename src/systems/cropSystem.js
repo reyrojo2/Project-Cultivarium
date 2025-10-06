@@ -5,6 +5,38 @@
  * - Emite actualizaciones visuales cuando cambia la etapa.
  */
 import { State, repoAll, repoGet } from '../core/state.js';
+import { Factory } from '../core/factory.js';
+import { ALERTAS_TIPO } from '../data/enums.js';
+import { translate as t } from '../utils/i18n.js';
+
+const CROP_ALERT_CODE = 'CROP_DEAD';
+
+// Administra la alerta persistente que marca cuando un cultivo muere en una parcela
+function ensureCropAlert(parcelaId, message) {
+  if (!parcelaId) return;
+  const alertsRepo = State?.repos?.alertas;
+  if (!alertsRepo) return;
+
+  const existing = Array.from(alertsRepo.values())
+    .find(a => a.parcelaId === parcelaId && a.codigo === CROP_ALERT_CODE);
+
+  if (message) {
+    if (existing) {
+      existing.mensaje = message;
+      existing.visible = true;
+      existing.tipo = ALERTAS_TIPO.PELIGRO;
+    } else {
+      Factory.createAlerta({
+        tipo: ALERTAS_TIPO.PELIGRO,
+        mensaje: message,
+        parcelaId,
+        codigo: CROP_ALERT_CODE
+      });
+    }
+  } else if (existing) {
+    existing.visible = false;
+  }
+}
 
 // Configuración base de cultivos disponibles.
 export const CROP_CONFIG = {
@@ -77,6 +109,7 @@ export function tickCrops() {
         cultivo.etapa = 'MUERTO';
         notifyCropStageChange(cultivo);
       }
+      ensureCropAlert(p.id, t('ui.alerts.cropDied', { parcel: p.id }));
       continue;
     }
 
@@ -89,6 +122,9 @@ export function tickCrops() {
       if (cultivo.saludActual <= 0 && cultivo.etapa !== 'MUERTO') {
         cultivo.etapa = 'MUERTO';
         notifyCropStageChange(cultivo);
+      }
+      if (cultivo.saludActual <= 0) {
+        ensureCropAlert(p.id, t('ui.alerts.cropDied', { parcel: p.id }));
       }
       continue;
     }
@@ -122,6 +158,13 @@ export function tickCrops() {
         cultivo.etapa = 'MUERTO';
         notifyCropStageChange(cultivo);
       }
+      if (cultivo.saludActual <= 0) {
+        ensureCropAlert(p.id, t('ui.alerts.cropDied', { parcel: p.id }));
+      }
+    }
+
+    if (cultivo.saludActual > 0 && cultivo.etapa !== 'MUERTO') {
+      ensureCropAlert(p.id, null);
     }
   }
 }

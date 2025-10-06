@@ -228,6 +228,7 @@ export default class GameScene extends Phaser.Scene {
     this.timeOfDay = 0.5;   // 0..1 (se sincroniza con la simulación al iniciar)
     this.parcelaIdByCultivoId = new Map();
     this.cultivoSprites = new Map();
+    this.alertMarkers = new Map();
   }
 
   create() {
@@ -292,6 +293,7 @@ export default class GameScene extends Phaser.Scene {
     this.spriteByParcela = new Map();
     this.parcelaIdByCultivoId = new Map();
     this.cultivoSprites = new Map();
+    this.alertMarkers = new Map();
     this.selectedParcelaId = null;
 
     // helper
@@ -560,6 +562,8 @@ export default class GameScene extends Phaser.Scene {
     this.game.events.on('action:perform', this._onUIAction);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.game.events.off('action:perform', this._onUIAction);
+      this.alertMarkers.forEach(marker => marker.destroy());
+      this.alertMarkers.clear();
     });
 
     if (!this.scene.isActive('UI')) this.scene.launch('UI');
@@ -648,6 +652,142 @@ export default class GameScene extends Phaser.Scene {
     if (existing) {
       existing.destroy();
       this.cultivoSprites.delete(parcelaId);
+    }
+  }
+
+  createAlertMarker(alert, pos) {
+    if (!pos) return null;
+
+    // Calcula medidas dependientes del ancho actual para que el tooltip escale
+    // correctamente en desktop, tablet o móvil.
+    const computeResponsiveMetrics = () => {
+      const viewportWidth = this.scale.width;
+      const scaleFactor = Phaser.Math.Clamp(viewportWidth / 1280, 0.85, 1.65);
+
+      return {
+        bubbleOffset: Math.round(120 * scaleFactor),
+        fontSize: Math.round(36 * scaleFactor),
+        padX: Math.round(32 * scaleFactor),
+        padY: Math.round(26 * scaleFactor),
+        pointerHeight: Math.round(34 * scaleFactor),
+        maxWidth: Phaser.Math.Clamp(Math.round(viewportWidth * 0.55), 360, 700),
+        pointerMaxHalf: Math.round(52 * scaleFactor),
+        floatAmplitude: Math.round(20 * scaleFactor)
+      };
+    };
+
+    const metrics = computeResponsiveMetrics();
+
+    // Contenedor flotante que se ancla sobre la parcela y se reubica según escala.
+    const container = this.add.container(pos.x, pos.y - metrics.bubbleOffset);
+    container.setDepth(pos.y + 1600);
+
+    const bubble = this.add.graphics();
+    const text = this.add.text(0, 0, '', {
+      fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+      fontSize: `${metrics.fontSize}px`,
+      fontStyle: 'bold',
+      color: '#f8fafc',
+      align: 'center'
+    }).setOrigin(0.5, 1);
+
+    const redraw = (message, targetPos) => {
+      const nextMetrics = computeResponsiveMetrics();
+
+      if (targetPos) {
+        container.setPosition(targetPos.x, targetPos.y - nextMetrics.bubbleOffset);
+        container.setDepth(targetPos.y + 1600);
+      }
+
+      text.setFontSize(nextMetrics.fontSize);
+      text.setText(message || '');
+
+      const wrapWidth = nextMetrics.maxWidth - nextMetrics.padX * 2;
+      text.setWordWrapWidth(wrapWidth, true);
+      const contentWidth = Math.min(wrapWidth, text.width);
+      const width = Math.max(280, contentWidth + nextMetrics.padX * 2);
+      const height = text.height + nextMetrics.padY * 2;
+      const pointerTop = -nextMetrics.pointerHeight;
+      const bubbleTop = pointerTop - height;
+      const pointerHalf = Math.min(nextMetrics.pointerMaxHalf, width / 3);
+
+      bubble.clear();
+      bubble.fillStyle(0x0f172a, 0.96);
+      bubble.fillRoundedRect(-width / 2, bubbleTop, width, height, 22);
+      bubble.fillTriangle(-pointerHalf, pointerTop, pointerHalf, pointerTop, 0, 0);
+      bubble.lineStyle(4, 0xfacc15, 0.98);
+      bubble.strokeRoundedRect(-width / 2, bubbleTop, width, height, 22);
+      bubble.strokeTriangle(-pointerHalf, pointerTop, pointerHalf, pointerTop, 0, 0);
+      text.y = pointerTop - nextMetrics.padY + 8;
+    };
+
+    container.add([bubble, text]);
+    redraw(alert.mensaje, pos);
+
+    // Movimiento sutil para llamar la atención sobre la parcela alertada.
+    const bob = this.tweens.add({
+      targets: container,
+      y: container.y - metrics.floatAmplitude,
+      duration: 1600,
+      ease: 'Sine.easeInOut',
+      yoyo: true,
+      repeat: -1
+    });
+
+    return {
+      container,
+      text,
+      bubble,
+      update: (message, nextPos) => redraw(message, nextPos),
+      destroy: () => {
+        if (bob) bob.stop();
+        container.destroy();
+      }
+    };
+  }
+
+  syncAlertMarkers() {
+    if (!this.alertMarkers) this.alertMarkers = new Map();
+    const activeAlerts = repoAll('alertas');
+    const keep = new Set();
+
+    for (const alert of activeAlerts) {
+      const isVisible = alert && alert.visible !== false;
+      if (!isVisible) continue;
+      const blockId = alert.parcelaId ? this.blockIdByParcelaId.get(alert.parcelaId) : null;
+      const pos = blockId ? this.blockPositions.get(blockId) : null;
+      const marker = this.alertMarkers.get(alert.id);
+      if (!pos) {
+        if (marker) {
+          marker.destroy();
+          this.alertMarkers.delete(alert.id);
+        }
+        continue;
+      }
+
+      keep.add(alert.id);
+
+      if (!marker) {
+        const created = this.createAlertMarker(alert, pos);
+        if (created) {
+          this.alertMarkers.set(alert.id, { ...created, message: alert.mensaje });
+        }
+        continue;
+      }
+
+      if (marker.message !== alert.mensaje) {
+        marker.message = alert.mensaje;
+        marker.update(alert.mensaje, pos);
+      } else {
+        marker.update(alert.mensaje, pos);
+      }
+    }
+
+    for (const [id, marker] of this.alertMarkers.entries()) {
+      if (!keep.has(id)) {
+        marker.destroy();
+        this.alertMarkers.delete(id);
+      }
     }
   }
 
@@ -946,6 +1086,7 @@ export default class GameScene extends Phaser.Scene {
         .catch(err => console.error('climate:tick', err));
     }
     tickCrops(); tickPlagues(); tickAlerts();
+    this.syncAlertMarkers();
 
     // 8) Secado periódico
     if ((State.clock % 15) === 0) {
