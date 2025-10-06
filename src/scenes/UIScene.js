@@ -65,11 +65,13 @@ export default class UIScene extends Phaser.Scene {
     this.actionButtons = []; 
 
     // ===== Panel Izquierdo (Status/Data + Inspección + Alertas) =====
-    this.statusPanel = this.createCollapsiblePanel(0, 0, 340, screenH, 'left', colors, colors.dataPanelBg);
+    this.statusPanel = this.createCollapsiblePanel(0, 0, 340, screenH, 'left', colors, colors.dataPanelBg, true);
     this.populateStatusPanel(this.statusPanel, colors);
 
     // ===== Panel Derecho (Acciones) =====
-    this.actionPanel = this.createCollapsiblePanel(screenW, 0, 300, screenH, 'right', colors, colors.panelBg);
+    // El panel derecho no requiere máscara porque su contenido es limitado;
+    // esto evita que el recorte ocultara accidentalmente los botones.
+    this.actionPanel = this.createCollapsiblePanel(screenW, 0, 300, screenH, 'right', colors, colors.panelBg, false);
     this.populateActionPanel(this.actionPanel, colors);
 
     // ===== HUD Principal (Elementos Fijos y Vitales) =====
@@ -102,7 +104,7 @@ export default class UIScene extends Phaser.Scene {
   }
 
   // ---------- Panel colapsable ----------
-  createCollapsiblePanel(x, y, width, height, side, colors, bgColor) {
+  createCollapsiblePanel(x, y, width, height, side, colors, bgColor, maskContent = true) {
     const container = this.add.container(x, y).setDepth(99);
     if (side === 'right') container.x -= width;
 
@@ -111,13 +113,6 @@ export default class UIScene extends Phaser.Scene {
     const panelBg = this.add.graphics();
     panelBg.fillStyle(bgColor, 0.9).fillRoundedRect(0, 0, width, height, rads);
     panelBg.lineStyle(4, colors.panelBorder).strokeRoundedRect(0, 0, width, height, rads);
-
-    // Máscara dedicada (no visible) que replica la geometría del panel para evitar
-    // que un gráfico transparente tape los botones cuando el contenedor se mueve.
-    const maskShape = this.add.graphics();
-    maskShape.fillStyle(0xffffff, 1).fillRoundedRect(0, 0, width, height, rads);
-    maskShape.setVisible(false);
-    maskShape.setActive(false);
 
     const toggleButton = this.add.text(
       side === 'left' ? width - 25 : 25,
@@ -130,22 +125,34 @@ export default class UIScene extends Phaser.Scene {
 
     const content = this.add.container(0, 0);
 
-    container.add([panelBg, maskShape, content, toggleButton]);
+    if (maskContent) {
+      // Máscara dedicada (no visible) que replica la geometría del panel para evitar
+      // que un gráfico transparente tape los botones cuando el contenedor se mueve.
+      const maskShape = this.add.graphics();
+      maskShape.fillStyle(0xffffff, 1).fillRoundedRect(0, 0, width, height, rads);
+      maskShape.setVisible(false);
+      maskShape.setActive(false);
+
+      container.add([panelBg, maskShape, content, toggleButton]);
+
+      // Usamos la geometría dedicada para recortar el contenido y que la máscara siga
+      // cualquier animación (colapsar/expandir) sin afectar la visibilidad del fondo.
+      const geometryMask = maskShape.createGeometryMask();
+      geometryMask.setInvertAlpha(false);
+      content.setMask(geometryMask);
+
+      // Liberamos recursos de la máscara si el contenedor se destruye.
+      container.once(Phaser.GameObjects.Events.DESTROY, () => {
+        maskShape.destroy();
+        geometryMask.destroy();
+      });
+    } else {
+      // Sin máscara: el contenido se agrega directamente y los botones nunca se ocultan.
+      container.add([panelBg, content, toggleButton]);
+    }
 
     container.setSize(width, height);
     container.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
-
-    // Usamos la geometría dedicada para recortar el contenido y que la máscara siga
-    // cualquier animación (colapsar/expandir) sin afectar la visibilidad del fondo.
-    const geometryMask = maskShape.createGeometryMask();
-    geometryMask.setInvertAlpha(false);
-    content.setMask(geometryMask);
-
-    // Liberamos recursos de la máscara si el contenedor se destruye.
-    container.once(Phaser.GameObjects.Events.DESTROY, () => {
-      maskShape.destroy();
-      geometryMask.destroy();
-    });
 
     const panelState = { maxScroll: 0 };
 
